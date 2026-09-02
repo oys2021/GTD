@@ -87,6 +87,12 @@ tailwind.config = {
     }
     
     #sidebar.open { transform:translateX(0); }
+    #sidebar.open > div:first-child {
+      padding-right: 68px;
+    }
+    #sidebarToggle.open {
+      left: calc(min(86vw, 320px) - 52px);
+    }
     
     #app { flex-direction: column; }
     main { flex: 1; min-width: 0; min-height: 0; }
@@ -101,9 +107,9 @@ tailwind.config = {
     
     h2 { font-size: 24px; }
     
-    button { padding: 8px 12px; font-size: 12px; }
-    
-    .w-\[240px\] { width: 100%; }
+    #main button { font-size: 12px; }
+
+    #main .w-\[240px\] { width: 100%; }
     .w-\[400px\] { width: 100%; max-width: 100%; }
     .max-w-\[400px\] { max-width: 90vw; }
     .max-w-\[540px\] { max-width: 90vw; }
@@ -119,9 +125,6 @@ tailwind.config = {
     .num { font-size: 10px; }
     
     .mx-\[22px\] { margin-left: 12px; margin-right: 12px; }
-    
-    /* Sidebar sections */
-    .mt-auto { margin-top: 0; order: 10; }
     
     /* Hide long text on mobile */
     .truncate { max-width: 120px; }
@@ -140,6 +143,116 @@ tailwind.config = {
     #procBody .grid-cols-2 { grid-template-columns:1fr; }
     #procBody h2 { font-size:30px; }
     #proc aside { display:none; }
+
+    /* Mobile layout and scrolling */
+    body { overscroll-behavior: none; }
+    #app { width: 100%; overflow: hidden; }
+    #main {
+      width: 100%;
+      max-width: 100vw;
+      overflow: hidden;
+    }
+    #main > .flex-1 {
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+    }
+    #main > div:first-child {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 16px;
+      padding: 20px 16px 14px;
+    }
+    #main > div:first-child > div:last-child {
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    #main > div:first-child > div:last-child button {
+      flex: 1 1 auto;
+      min-height: 40px;
+    }
+    #main .grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    #main .group {
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+    #main .group > .flex-none {
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      opacity: 1;
+    }
+    #main .group > .opacity-0 {
+      width: 100%;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      opacity: 1;
+    }
+    #main select[data-move-id] {
+      display: block;
+      width: min(100%, 190px);
+      max-width: 100%;
+      margin-left: 0;
+      min-height: 36px;
+    }
+    #main form[data-act="capture"] {
+      padding: 16px;
+    }
+    #main form[data-act="capture"] > div {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #sidebar .mt-auto {
+      margin-top: auto;
+      order: initial;
+    }
+    #sidebar button {
+      min-height: 40px;
+    }
+    #modal,
+    #contextsModal,
+    #detailsModal {
+      padding: 12px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #modal > div,
+    #contextsModal > div,
+    #detailsModal > div {
+      width: 100%;
+      max-width: 100% !important;
+      margin: auto 0 !important;
+      padding: 20px !important;
+      max-height: calc(100dvh - 24px) !important;
+    }
+    #detailsModal > div > .flex,
+    #contextsModal > div > .flex {
+      flex-wrap: wrap;
+    }
+    #detailsModal button,
+    #contextsModal button {
+      min-height: 40px;
+    }
+    #proc {
+      z-index: 70;
+      height: 100dvh;
+      overflow: hidden;
+    }
+    #proc > div:first-child {
+      flex-wrap: wrap;
+      flex: none;
+    }
+    #proc > div:first-child > div:last-child {
+      width: 100%;
+      justify-content: space-between;
+    }
+    #procBody {
+      min-height: 0;
+      padding-bottom: calc(28px + env(safe-area-inset-bottom));
+    }
   }
   
   /* Tablet (768px to 1024px) */
@@ -164,9 +277,11 @@ tailwind.config = {
     #modal > div,
     #contextsModal > div,
     #detailsModal > div {
-      max-width: 90vw !important;
-      margin: 16px !important;
-      max-height: 80vh !important;
+      width: 100%;
+      max-width: calc(100vw - 24px) !important;
+      margin: auto 0 !important;
+      padding: 20px !important;
+      max-height: calc(100dvh - 24px) !important;
       overflow-y: auto !important;
     }
     
@@ -178,7 +293,7 @@ tailwind.config = {
     #detailsModal > div {
       margin: 0 !important;
       border-radius: 16px 16px 0 0 !important;
-      max-height: 90vh !important;
+      max-height: calc(100dvh - 12px) !important;
     }
   }
 </style>
@@ -369,8 +484,40 @@ const age = (t) => {
 let view = 'inbox';
 let ctxFilter = 'all';
 
+function isTodayValue(value) {
+  if (!value) return false;
+  const text = String(value).trim().toLowerCase();
+  if (text.includes('today')) return true;
+  const today = new Date();
+  const weekday = today.toLocaleDateString(undefined, { weekday: 'short' }).toLowerCase();
+  if (text.startsWith(weekday)) return true;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime()) &&
+    parsed.getFullYear() === today.getFullYear() &&
+    parsed.getMonth() === today.getMonth() &&
+    parsed.getDate() === today.getDate();
+}
+
+function getAgenda() {
+  const actionable = items.filter(i => i.status === 'next' || i.status === 'calendar');
+  const now = actionable.filter(i => i.priority === 'urgent');
+  const nowIds = new Set(now.map(i => i.id));
+  const today = actionable.filter(i =>
+    !nowIds.has(i.id) && (isTodayValue(i.when) || isTodayValue(i.dueTime))
+  );
+  const scheduledIds = new Set([...now, ...today].map(i => i.id));
+  const next = actionable
+    .filter(i => i.status === 'next' && !scheduledIds.has(i.id))
+    .sort((a, b) => a.created - b.created)
+    .slice(0, 5);
+  return { now, today, next };
+}
+
 const NAV = [
-  { id: 'now', label: 'Do It Now', count: () => items.filter(i => i.priority === 'urgent').length },
+  { id: 'now', label: 'Today / Now', count: () => {
+    const agenda = getAgenda();
+    return agenda.now.length + agenda.today.length + agenda.next.length;
+  }},
   { id: 'inbox', label: 'Inbox', count: () => by('inbox').length },
   { id: 'processing', label: 'Processing', dot: true },
   { id: 'next', label: 'Next Actions', count: () => by('next').length },
@@ -415,10 +562,62 @@ const statusBadge = (status, context, who, when) => {
   return badges.join('');
 };
 
+const MOVE_DESTINATIONS = [
+  ['now', 'Do It Now'],
+  ['inbox', 'Inbox'],
+  ['next', 'Next Actions'],
+  ['calendar', 'Calendar'],
+  ['waiting', 'Waiting On'],
+  ['someday', 'Someday / Maybe'],
+  ['reference', 'Reference']
+];
+
+function moveSelect(item) {
+  const current = item.priority === 'urgent' ? 'now' : item.status;
+  return '<select data-move-id="' + item.id + '" aria-label="Move ' + esc(item.action || item.text) + '" class="ml-1 border border-rule bg-paper px-2 py-1 text-[11px] text-body rounded">' +
+    MOVE_DESTINATIONS.map(([id, label]) =>
+      '<option value="' + id + '"' + (id === current ? ' selected' : '') + '>' + (id === current ? 'In: ' : 'Move to: ') + label + '</option>'
+    ).join('') +
+  '</select>';
+}
+
+function moveItem(item, destination) {
+  if (destination === 'now') {
+    item.priority = 'urgent';
+    item.status = 'next';
+    item.context = item.context || CONTEXTS[0] || '@Anywhere';
+    return true;
+  }
+
+  if (item.priority === 'urgent') item.priority = 'normal';
+
+  if (destination === 'next' && !item.context) {
+    const context = prompt('Which context?', CONTEXTS[0] || '@Anywhere');
+    if (context === null) return false;
+    item.context = context.trim() || CONTEXTS[0] || '@Anywhere';
+  }
+
+  if (destination === 'calendar' && !item.when) {
+    const when = prompt('When should this happen?', 'Today 4:00 PM');
+    if (when === null) return false;
+    item.when = when.trim() || 'Today';
+  }
+
+  if (destination === 'waiting' && !item.who) {
+    const who = prompt('Who are you waiting on?', '');
+    if (who === null) return false;
+    item.who = who.trim() || 'someone';
+    item.since = 'today';
+  }
+
+  item.status = destination;
+  return true;
+}
+
 /* ══════════════════════════ views ══════════════════════════ */
 const V = {};
 
-V.now = () => {
+V.nowLegacy = () => {
   const urgent = items.filter(i => i.priority === 'urgent').sort((a, b) => (a.dueTime || 0) - (b.dueTime || 0));
   return head('Do It Now', 'Urgent actions that need your immediate attention.',
       btn('Edit priorities', 'data-go="next"')) +
@@ -431,7 +630,7 @@ V.now = () => {
             (i.duration ? '<div class="mt-1 text-[13px] text-red-700">⧖ ' + i.duration + ' min</div>' : '') +
             (i.notes ? '<div class="mt-2 text-[13px] text-red-800 font-mono bg-white px-2 py-1 rounded border border-red-200">📝 ' + esc(i.notes) + '</div>' : '') +
             (i.subtasks && i.subtasks.length ? '<div class="mt-2 text-[12px] text-red-700"><div class="font-semibold">Subtasks:</div><ul class="mt-1 ml-4">' + i.subtasks.map((s, si) => '<li>✓ ' + esc(s) + '</li>').join('') + '</ul></div>' : '') +
-            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+            '<div class="mt-2 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + moveSelect(i) + '</div>' +
           '</div>' +
           '<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
             '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors rounded">✎ Edit</button>' +
@@ -440,6 +639,41 @@ V.now = () => {
           '</div>' +
         '</div>').join('')
         : '<div class="py-20 text-center"><div class="text-[32px]">✨</div><div class="mt-2 text-[22px]">Clear!</div><div class="mt-2 text-sm text-mute">No urgent actions right now.</div></div>') +
+    '</div>';
+};
+
+function agendaCard(i) {
+  const timing = i.when || i.dueTime;
+  return '<div class="flex items-start gap-4 border border-line p-4 hover:bg-canvas transition-colors">' +
+    '<button data-act="done" data-id="' + i.id + '" class="w-6 h-6 flex items-center justify-center border border-green-500 bg-green-50 text-green-600 flex-none hover:bg-green-600 hover:text-white rounded-sm" title="Complete">✓</button>' +
+    '<div class="flex-1 min-w-0">' +
+      '<div class="text-[15px] leading-snug">' + esc(i.action || i.text) + '</div>' +
+      (timing ? '<div class="mt-1 text-[12px] text-accent">Due ' + esc(timing) + '</div>' : '') +
+      (i.duration ? '<div class="mt-1 num text-faint">' + i.duration + ' min</div>' : '') +
+      '<div class="mt-2 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + moveSelect(i) + '</div>' +
+    '</div>' +
+    '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded">Edit</button>' +
+  '</div>';
+}
+
+function agendaSection(title, note, list, emptyText) {
+  return '<section class="mb-9">' +
+    '<div class="flex items-end justify-between border-b border-line pb-3 mb-3">' +
+      '<div><div class="lbl text-label">' + title + '</div><div class="mt-2 text-[13px] text-mute">' + note + '</div></div>' +
+      '<div class="num text-faint">' + list.length + '</div>' +
+    '</div>' +
+    (list.length ? '<div class="grid gap-2">' + list.map(agendaCard).join('') + '</div>' : '<div class="py-5 text-sm text-faint">' + emptyText + '</div>') +
+  '</section>';
+}
+
+V.now = () => {
+  const agenda = getAgenda();
+  return head('Today / Now', 'What needs your attention now, followed by the next actions in line.',
+    btn('Capture something', 'data-go="inbox"')) +
+    '<div class="flex-1 overflow-y-auto scroll px-14 py-8">' +
+      agendaSection('Do now', 'Urgent actions requiring immediate attention.', agenda.now, 'Nothing urgent right now.') +
+      agendaSection('Due today', 'Scheduled or due today.', agenda.today, 'Nothing else is due today.') +
+      agendaSection('Next in line', 'Your five oldest available next actions.', agenda.next, 'Process your inbox to create next actions.') +
     '</div>';
 };
 
@@ -464,7 +698,7 @@ V.inbox = () => {
             '<button data-act="del" data-id="' + i.id + '" title="Delete" class="w-5 h-5 flex items-center justify-center border-2 border-red-400 text-red-500 hover:bg-red-500 hover:border-red-600 hover:text-white transition-all flex-none rounded">×</button>' +
             '<div class="flex-1 min-w-0">' +
               '<div class="text-[15px]">' + esc(i.text) + '</div>' +
-              '<div class="mt-1.5 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+              '<div class="mt-1.5 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + moveSelect(i) + '</div>' +
             '</div>' +
           '</div>' +
           '<div class="flex flex-col items-end gap-1 flex-none text-right">' +
@@ -503,7 +737,7 @@ V.next = () => {
                 (i.duration ? '<div class="mt-0.5 num text-faint">⧖ ' + i.duration + ' min</div>' : '') +
                 (i.dueTime ? '<div class="mt-0.5 num text-faint">⏰ ' + esc(i.dueTime) + '</div>' : '') +
                 '<div class="mt-1.5 num text-faint">' + (i.origin ? '■ from: ' + esc(i.origin) : '—') + '</div>' +
-                '<div class="mt-2 flex gap-1">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+                '<div class="mt-2 flex flex-wrap gap-1">' + statusBadge(i.status, i.context, i.who, i.when) + moveSelect(i) + '</div>' +
               '</div>' +
               '<div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">' +
                 '<button data-act="details" data-id="' + i.id + '" class="w-4 h-4 flex items-center justify-center text-blue-500 hover:text-blue-700 transition-colors flex-none text-xs" title="Edit details">✎</button>' +
@@ -528,7 +762,7 @@ V.calendar = () => {
             (i.duration ? '<div class="mt-1 num text-faint">⧖ ' + i.duration + ' min</div>' : '') +
             (i.dueTime ? '<div class="mt-1 num text-faint">⏰ ' + esc(i.dueTime) + '</div>' : '') +
             (i.notes ? '<div class="mt-1 text-[12px] text-body bg-canvas px-2 py-1 rounded">📝 ' + esc(i.notes) + '</div>' : '') +
-            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+            '<div class="mt-2 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + moveSelect(i) + '</div>' +
           '</div>' +
           '<div class="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
             '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors rounded">✎ Edit</button>' +
@@ -552,7 +786,7 @@ V.waiting = () => {
             (i.duration ? '<div class="mt-1 num text-faint">⧖ ' + i.duration + ' min</div>' : '') +
             (i.dueTime ? '<div class="mt-1 num text-faint">⏰ ' + esc(i.dueTime) + '</div>' : '') +
             (i.notes ? '<div class="mt-1 text-[12px] text-body bg-canvas px-2 py-1 rounded">📝 ' + esc(i.notes) + '</div>' : '') +
-            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+            '<div class="mt-2 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + moveSelect(i) + '</div>' +
           '</div>' +
           '<div class="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
             '<div class="num text-faint">since ' + esc(i.since || age(i.created)) + '</div>' +
@@ -576,7 +810,7 @@ V.someday = () => {
             '<div class="text-[15px]">' + esc(i.text) + '</div>' +
             (i.duration ? '<div class="mt-1 num text-faint">⧖ ' + i.duration + ' min</div>' : '') +
             (i.dueTime ? '<div class="mt-1 num text-faint">⏰ ' + esc(i.dueTime) + '</div>' : '') +
-            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+            '<div class="mt-2 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + moveSelect(i) + '</div>' +
           '</div>' +
           '<div class="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
             '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors rounded">✎ Edit</button>' +
@@ -597,7 +831,7 @@ V.reference = () => {
           '<div class="flex-1 min-w-0">' +
             '<div class="text-[15px]">' + esc(i.text) + '</div>' +
             (i.notes ? '<div class="mt-1 text-[12px] text-body bg-canvas px-2 py-1 rounded">📝 ' + esc(i.notes) + '</div>' : '') +
-            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+            '<div class="mt-2 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + moveSelect(i) + '</div>' +
           '</div>' +
           '<div class="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
             '<div class="num text-faint">■ filed ' + age(i.created) + ' ago</div>' +
@@ -629,7 +863,7 @@ let P = null;
 
 function startProcessing() {
   const queue = by('inbox').sort((a, b) => a.created - b.created).map(i => i.id);
-  if (!queue.length) { view = 'inbox'; render(); return; }
+  if (!queue.length) { view = 'now'; render(); return; }
   P = { queue, i: 0, step: 1, total: queue.length, stats: { quick: 0, next: 0, deleted: 0, filed: 0 }, action: '' };
   document.getElementById('proc').classList.remove('hidden');
   document.getElementById('proc').classList.add('flex');
@@ -644,7 +878,7 @@ function endProcessing() {
   P = null;
   document.getElementById('proc').classList.add('hidden');
   document.getElementById('proc').classList.remove('flex');
-  view = 'inbox';
+  view = 'now';
   render();
 }
 
@@ -988,6 +1222,7 @@ sidebarToggle.setAttribute('aria-label', 'Open navigation');
 sidebarToggle.addEventListener('click', () => {
   sidebar.classList.toggle('open', sidebarOpen);
   sidebarBackdrop.classList.toggle('open', sidebarOpen);
+  sidebarToggle.classList.toggle('open', sidebarOpen);
   sidebarToggle.setAttribute('aria-expanded', String(sidebarOpen));
 });
 
@@ -996,6 +1231,7 @@ sidebarBackdrop.addEventListener('click', () => {
   sidebar.style.removeProperty('display');
   sidebar.classList.remove('open');
   sidebarBackdrop.classList.remove('open');
+  sidebarToggle.classList.remove('open');
   sidebarToggle.innerHTML = '&#9776;';
   sidebarToggle.setAttribute('aria-expanded', 'false');
 });
@@ -1022,6 +1258,7 @@ document.addEventListener('click', (e) => {
     sidebar.style.removeProperty('display');
     sidebar.classList.remove('open');
     sidebarBackdrop.classList.remove('open');
+    sidebarToggle.classList.remove('open');
     sidebarToggle.setAttribute('aria-expanded', 'false');
   }
 });
@@ -1069,6 +1306,22 @@ document.addEventListener('click', (e) => {
   if (a === 'archiveAll') { if (!confirm('Move all inbox items to Reference?')) return; by('inbox').forEach(i => i.status = 'reference'); }
   if (a === 'monthly') { view = 'someday'; alert('Monthly review: work down the list and send anything live back to the inbox.'); }
   save(); render();
+});
+
+document.addEventListener('change', (e) => {
+  const select = e.target.closest('[data-move-id]');
+  if (!select) return;
+  const item = items.find(i => i.id === select.dataset.moveId);
+  if (!item) return;
+  const previous = item.priority === 'urgent' ? 'now' : item.status;
+  if (!moveItem(item, select.value)) {
+    select.value = previous;
+    return;
+  }
+  const destination = MOVE_DESTINATIONS.find(([id]) => id === select.value);
+  localStorage.setItem(KEY, JSON.stringify(items));
+  showNotification('Moved to ' + (destination ? destination[1] : select.value), 'success');
+  render();
 });
 
 document.addEventListener('submit', (e) => {
