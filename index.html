@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTD</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        ink:    '#0A0A0A',
+        paper:  '#FFFFFF',
+        canvas: '#F7F7F5',
+        soft:   '#FAFAF8',
+        line:   '#E3E3DF',
+        line2:  '#EFEFEB',
+        rule:   '#CFCFC9',
+        edge:   '#D8D8D3',
+        body:   '#5C5C58',
+        mute:   '#7A7A75',
+        label:  '#8A8A85',
+        dim:    '#9A9A95',
+        faint:  '#A8A8A2',
+        ghost:  '#B0B0AA',
+        accent: 'oklch(0.55 0.16 30)'
+      },
+      fontFamily: {
+        sans: ['"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace']
+      }
+    }
+  }
+}
+</script>
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; }
+  .lbl { font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 11px; line-height: 1; letter-spacing: .16em; text-transform: uppercase; }
+  .num { font-family: "JetBrains Mono", monospace; font-size: 11px; line-height: 1; }
+  input, textarea { outline: none; }
+  ::placeholder { color: #B0B0AA; }
+  .scroll { scrollbar-width: thin; scrollbar-color: #D8D8D3 transparent; }
+  .scroll::-webkit-scrollbar { width: 8px; }
+  .scroll::-webkit-scrollbar-thumb { background: #D8D8D3; }
+</style>
+</head>
+<body class="bg-paper font-sans text-ink antialiased">
+
+<!-- ───────── notifications ───────── -->
+<div id="notifications" class="fixed top-4 right-4 z-40 space-y-2 max-w-[400px]"></div>
+
+<div id="app" class="flex h-screen overflow-hidden">
+
+  <!-- ───────── sidebar ───────── -->
+  <aside class="w-[240px] flex-none border-r border-line flex flex-col py-7">
+    <div class="px-[22px] pb-7 lbl">Getting&nbsp;Things&nbsp;Done</div>
+    <nav id="nav" class="flex flex-col gap-px px-3"></nav>
+    <div class="mt-auto mx-[22px] border border-line p-4">
+      <div class="lbl text-accent" style="font-size:10px;letter-spacing:.14em">Up next</div>
+      <div class="mt-2.5 text-sm">Processing</div>
+      <div class="mt-1.5 num text-dim">Today, 4:00 PM</div>
+      <button data-go="processing" class="mt-3.5 w-full border border-rule py-2 text-[13px] hover:bg-canvas">Start now</button>
+    </div>
+    <div class="mx-[22px] mt-4 pt-4 border-t border-line">
+      <button id="settingsBtn" class="w-full text-left px-2.5 py-2 text-sm text-mute hover:text-ink hover:bg-canvas">⚙ Manage Contexts</button>
+      <button id="clearDataBtn" class="w-full text-left px-2.5 py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 mt-1">✕ Clear All Data</button>
+    </div>
+  </aside>
+
+  <!-- ───────── main ───────── -->
+  <main id="main" class="flex-1 flex flex-col min-w-0"></main>
+</div>
+
+<!-- ───────── confirmation modal ───────── -->
+<div id="modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+  <div class="bg-paper border border-line p-8 max-w-[440px] rounded-sm">
+    <div class="text-[20px] font-normal mb-2" id="modalTitle">Confirm Action</div>
+    <div class="text-[15px] text-body mb-6" id="modalText">Are you sure?</div>
+    <div class="flex gap-3 justify-end">
+      <button id="modalCancel" class="px-4 py-[11px] text-[13px] border border-rule hover:bg-canvas">Cancel</button>
+      <button id="modalConfirm" class="px-4 py-[11px] text-[13px] border border-ink bg-ink text-paper hover:opacity-90">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── contexts management modal ───────── -->
+<div id="contextsModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+  <div class="bg-paper border border-line p-8 max-w-[540px] max-h-[80vh] overflow-y-auto rounded-sm">
+    <div class="text-[20px] font-normal mb-2">Manage Action Contexts</div>
+    <div class="text-[13px] text-mute mb-6">Create, edit, or delete your action contexts</div>
+    
+    <div class="mb-6 border-t border-line pt-4">
+      <div class="flex gap-2 mb-4">
+        <input id="newContextInput" type="text" placeholder="Add new context (e.g., @Computer)" class="flex-1 border border-rule px-3 py-2 text-[13px]">
+        <button id="addContextBtn" class="px-4 py-2 text-[13px] border border-ink bg-ink text-paper hover:opacity-90">Add</button>
+      </div>
+    </div>
+    
+    <div id="contextsList" class="border-t border-line pt-4 mb-6">
+      <!-- Contexts list will be populated here -->
+    </div>
+    
+    <div class="flex gap-3 justify-end border-t border-line pt-4">
+      <button id="contextsClose" class="px-4 py-[11px] text-[13px] border border-rule hover:bg-canvas">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── task details modal ───────── -->
+<div id="detailsModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto">
+  <div class="bg-paper border border-line p-8 max-w-[600px] my-8 rounded-sm">
+    <div class="text-[20px] font-normal mb-2" id="detailsTitle">Task Details</div>
+    <div class="border-t border-line pt-4 mt-4">
+      
+      <div class="mb-4">
+        <label class="lbl text-label mb-2 block">Priority</label>
+        <div class="flex gap-2">
+          <button id="priorityUrgent" class="px-3 py-2 text-[13px] border border-red-400 text-red-600 hover:bg-red-50">Urgent (Now)</button>
+          <button id="priorityHigh" class="px-3 py-2 text-[13px] border border-orange-400 text-orange-600 hover:bg-orange-50">High</button>
+          <button id="priorityNormal" class="px-3 py-2 text-[13px] border border-rule text-body hover:bg-canvas">Normal</button>
+          <button id="priorityLow" class="px-3 py-2 text-[13px] border border-gray-400 text-gray-600 hover:bg-gray-50">Low</button>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label class="lbl text-label mb-2 block">Duration (minutes)</label>
+        <input id="detailsDuration" type="number" min="1" placeholder="How long will this take?" class="w-full border border-rule px-3 py-2 text-[13px]">
+      </div>
+
+      <div class="mb-4">
+        <label class="lbl text-label mb-2 block">Due Date/Time</label>
+        <input id="detailsDue" type="text" placeholder="e.g., Today 3pm, Tomorrow 10am" class="w-full border border-rule px-3 py-2 text-[13px]">
+      </div>
+
+      <div class="mb-4">
+        <label class="lbl text-label mb-2 block">Notes</label>
+        <textarea id="detailsNotes" placeholder="Add any notes or details..." class="w-full border border-rule px-3 py-2 text-[13px] min-h-[80px]"></textarea>
+      </div>
+
+      <div class="mb-4">
+        <label class="lbl text-label mb-2 block">Subtasks</label>
+        <div id="subtasksList" class="space-y-2 mb-2"></div>
+        <div class="flex gap-2">
+          <input id="newSubtaskInput" type="text" placeholder="Add a subtask..." class="flex-1 border border-rule px-3 py-2 text-[13px]">
+          <button id="addSubtaskBtn" class="px-3 py-2 text-[13px] border border-ink bg-ink text-paper hover:opacity-90">Add</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="flex gap-3 justify-end border-t border-line pt-4 mt-4">
+      <button id="detailsCancel" class="px-4 py-[11px] text-[13px] border border-rule hover:bg-canvas">Cancel</button>
+      <button id="detailsSave" class="px-4 py-[11px] text-[13px] border border-ink bg-ink text-paper hover:opacity-90">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── processing overlay ───────── -->
+<div id="proc" class="hidden fixed inset-0 bg-paper flex-col">
+  <div class="flex items-center justify-between px-10 py-[22px] border-b border-line flex-none">
+    <div class="flex items-center gap-4">
+      <div class="lbl" style="letter-spacing:.2em">Processing</div>
+      <div class="num text-dim">4:00 PM · daily</div>
+    </div>
+    <div class="flex items-center gap-[18px]">
+      <div id="procCount" class="font-mono text-xs text-body">00 / 00</div>
+      <div class="w-[280px] h-0.5 bg-line2"><div id="procBar" class="h-0.5 bg-ink" style="width:0%"></div></div>
+      <button id="procExit" class="text-[13px] text-mute hover:text-ink">Pause</button>
+    </div>
+  </div>
+  <div class="flex-1 flex min-h-0">
+    <div id="procBody" class="flex-1 flex flex-col justify-center px-20 border-r border-line min-w-0"></div>
+    <aside class="w-[400px] flex-none flex flex-col py-11 px-10 gap-8 bg-soft">
+      <div>
+        <div class="lbl text-label">Routing rules</div>
+        <div class="mt-[18px] flex flex-col" id="procRules"></div>
+      </div>
+      <div class="mt-auto border border-line bg-paper p-[18px]">
+        <div class="lbl text-label" style="font-size:10px;letter-spacing:.14em">Session</div>
+        <div id="procStats" class="mt-3.5 flex flex-col gap-2.5 text-[13px] text-body"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════ state ══════════════════════════ */
+const DEFAULT_CONTEXTS = ['@Work PC', '@Store', '@Home', '@Calls', '@Errands', '@Anywhere'];
+const KEY = 'gtd.store.v1';
+const CONTEXTS_KEY = 'gtd.contexts.v1';
+
+let CONTEXTS = [];
+try { CONTEXTS = JSON.parse(localStorage.getItem(CONTEXTS_KEY)) || DEFAULT_CONTEXTS; }
+catch (e) { CONTEXTS = DEFAULT_CONTEXTS; }
+if (!Array.isArray(CONTEXTS) || !CONTEXTS.length) CONTEXTS = DEFAULT_CONTEXTS;
+
+const SEED = [];
+
+let uid = 1;
+const mk = (o) => Object.assign({ id: 'i' + (uid++) + '-' + Date.now().toString(36), created: Date.now(), status: 'inbox', source: 'note' }, o);
+
+function seed() {
+  return [];
+}
+
+let items;
+try { items = JSON.parse(localStorage.getItem(KEY)) || seed(); }
+catch (e) { items = seed(); }
+if (!Array.isArray(items) || !items.length) items = seed();
+
+const save = () => {
+  localStorage.setItem(KEY, JSON.stringify(items));
+  showNotification('Changes saved', 'success');
+};
+const by = (s) => items.filter(i => i.status === s);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const age = (t) => {
+  const h = (Date.now() - t) / 36e5;
+  if (h < 1) return Math.max(1, Math.round(h * 60)) + 'm';
+  if (h < 24) return Math.round(h) + 'h';
+  return Math.round(h / 24) + 'd';
+};
+
+/* ══════════════════════════ chrome ══════════════════════════ */
+let view = 'inbox';
+let ctxFilter = 'all';
+
+const NAV = [
+  { id: 'now', label: 'Do It Now', count: () => items.filter(i => i.priority === 'urgent').length },
+  { id: 'inbox', label: 'Inbox', count: () => by('inbox').length },
+  { id: 'processing', label: 'Processing', dot: true },
+  { id: 'next', label: 'Next Actions', count: () => by('next').length },
+  { id: 'calendar', label: 'Calendar', count: () => by('calendar').length },
+  { id: 'waiting', label: 'Waiting On', count: () => by('waiting').length },
+  { id: '-' },
+  { id: 'someday', label: 'Someday / Maybe', count: () => by('someday').length },
+  { id: 'reference', label: 'Reference', count: () => by('reference').length }
+];
+
+function renderNav() {
+  document.getElementById('nav').innerHTML = NAV.map(n => {
+    if (n.id === '-') return '<div class="h-px bg-line mx-2.5 my-4"></div>';
+    const on = n.id === view;
+    const right = n.dot
+      ? '<span class="w-1.5 h-1.5 rounded-full bg-accent"></span>'
+      : '<span class="num ' + (on ? 'opacity-70' : 'text-dim') + '">' + n.count() + '</span>';
+    return '<button data-go="' + n.id + '" class="flex items-center justify-between p-2.5 text-sm text-left ' +
+      (on ? 'bg-ink text-paper' : 'text-body hover:bg-canvas') + '"><span>' + n.label + '</span>' + right + '</button>';
+  }).join('');
+}
+
+function head(title, sub, actions) {
+  return '<div class="flex items-end justify-between px-14 pt-[42px] pb-6 border-b border-line flex-none">' +
+    '<div class="flex flex-col gap-2"><h2 class="m-0 text-[32px] leading-none tracking-[-0.02em] font-normal">' + title + '</h2>' +
+    (sub ? '<p class="m-0 text-sm text-mute">' + sub + '</p>' : '') + '</div>' +
+    '<div class="flex gap-2.5">' + (actions || '') + '</div></div>';
+}
+
+const btn = (label, attr, primary) =>
+  '<button ' + attr + ' class="px-4 py-[11px] text-[13px] border ' +
+  (primary ? 'bg-ink border-ink text-paper hover:opacity-90' : 'bg-paper border-rule text-ink hover:bg-canvas') + '">' + label + '</button>';
+
+const statusBadge = (status, context, who, when) => {
+  const badges = [];
+  if (status === 'inbox') badges.push('<span class="inline-block px-2.5 py-1 text-[11px] border border-yellow-300 text-yellow-700 bg-yellow-50 rounded">▼ Inbox</span>');
+  if (status === 'next' && context) badges.push('<span class="inline-block px-2.5 py-1 text-[11px] border border-blue-400 text-blue-700 bg-blue-50 rounded">▶ ' + esc(context) + '</span>');
+  if (status === 'calendar' && when) badges.push('<span class="inline-block px-2.5 py-1 text-[11px] border border-purple-400 text-purple-700 bg-purple-50 rounded">▢ ' + esc(when) + '</span>');
+  if (status === 'waiting' && who) badges.push('<span class="inline-block px-2.5 py-1 text-[11px] border border-orange-400 text-orange-700 bg-orange-50 rounded">⌛ ' + esc(who) + '</span>');
+  if (status === 'someday') badges.push('<span class="inline-block px-2.5 py-1 text-[11px] border border-indigo-400 text-indigo-700 bg-indigo-50 rounded">✧ Someday</span>');
+  if (status === 'reference') badges.push('<span class="inline-block px-2.5 py-1 text-[11px] border border-gray-400 text-gray-700 bg-gray-50 rounded">▬ Reference</span>');
+  return badges.join('');
+};
+
+/* ══════════════════════════ views ══════════════════════════ */
+const V = {};
+
+V.now = () => {
+  const urgent = items.filter(i => i.priority === 'urgent').sort((a, b) => (a.dueTime || 0) - (b.dueTime || 0));
+  return head('Do It Now', 'Urgent actions that need your immediate attention.',
+      btn('Edit priorities', 'data-go="next"')) +
+    '<div class="flex-1 overflow-y-auto scroll px-14 py-8">' +
+      (urgent.length ? urgent.map(i =>
+        '<div class="flex items-start gap-6 py-4 px-4 border-2 border-red-300 bg-red-50 rounded mb-3 group hover:border-red-400 transition-colors">' +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="text-lg font-semi text-red-900">' + esc(i.action || i.text) + '</div>' +
+            (i.dueTime ? '<div class="mt-1 text-[13px] text-red-700">⏰ Due: ' + esc(i.dueTime) + '</div>' : '') +
+            (i.duration ? '<div class="mt-1 text-[13px] text-red-700">⧖ ' + i.duration + ' min</div>' : '') +
+            (i.notes ? '<div class="mt-2 text-[13px] text-red-800 font-mono bg-white px-2 py-1 rounded border border-red-200">📝 ' + esc(i.notes) + '</div>' : '') +
+            (i.subtasks && i.subtasks.length ? '<div class="mt-2 text-[12px] text-red-700"><div class="font-semibold">Subtasks:</div><ul class="mt-1 ml-4">' + i.subtasks.map((s, si) => '<li>✓ ' + esc(s) + '</li>').join('') + '</ul></div>' : '') +
+            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+          '</div>' +
+          '<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
+            '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors rounded">✎ Edit</button>' +
+            '<button data-act="done" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-green-500 bg-green-50 text-green-600 hover:bg-green-600 hover:text-white transition-colors rounded">✓ Done</button>' +
+            '<button data-act="del" data-id="' + i.id + '" class="w-4 h-4 flex items-center justify-center text-red-600 hover:text-red-800 transition-colors" title="Delete">✕</button>' +
+          '</div>' +
+        '</div>').join('')
+        : '<div class="py-20 text-center"><div class="text-[32px]">✨</div><div class="mt-2 text-[22px]">Clear!</div><div class="mt-2 text-sm text-mute">No urgent actions right now.</div></div>') +
+    '</div>';
+};
+
+V.inbox = () => {
+  const list = by('inbox').sort((a, b) => a.created - b.created);
+  return head('Inbox', 'Everything out of your mind. Nothing is decided here.',
+      btn('Archive all', 'data-act="archiveAll"') + btn('Start processing →', 'data-go="processing"', true)) +
+    '<div class="px-14 pt-7 pb-5 flex-none">' +
+      '<form data-act="capture" class="border border-ink px-[22px] py-5 flex flex-col gap-4">' +
+        '<input name="text" autocomplete="off" class="text-xl w-full bg-transparent" placeholder="What\u2019s on your mind?">' +
+        '<div class="flex items-center justify-between border-t border-line2 pt-3.5">' +
+          '<div class="num text-dim">Capture only — no lists, no tags, no deciding</div>' +
+          '<div class="flex items-center gap-2 num text-mute"><span class="border border-edge px-[7px] py-[5px]">C</span><span>capture from anywhere</span></div>' +
+        '</div>' +
+      '</form></div>' +
+    '<div class="px-14 flex items-center justify-between flex-none">' +
+      '<div class="lbl text-label">' + list.length + ' uncategorized</div><div class="num text-dim">oldest first</div></div>' +
+    '<div class="flex-1 overflow-y-auto scroll px-14 pt-3.5 pb-10">' +
+      (list.length ? list.map(i =>
+        '<div class="flex items-start gap-4 py-3 px-3 border border-transparent border-b border-line2 rounded hover:bg-canvas transition-colors group">' +
+          '<div class="flex items-center gap-3 flex-1 min-w-0">' +
+            '<button data-act="del" data-id="' + i.id + '" title="Delete" class="w-5 h-5 flex items-center justify-center border-2 border-red-400 text-red-500 hover:bg-red-500 hover:border-red-600 hover:text-white transition-all flex-none rounded">×</button>' +
+            '<div class="flex-1 min-w-0">' +
+              '<div class="text-[15px]">' + esc(i.text) + '</div>' +
+              '<div class="mt-1.5 flex flex-wrap gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="flex flex-col items-end gap-1 flex-none text-right">' +
+            '<div class="num text-faint">◐ ' + age(i.created) + '</div>' +
+            '<div class="num text-faint" style="color:#FF9500">◇ ' + i.source + '</div>' +
+          '</div>' +
+        '</div>').join('')
+        : '<div class="py-20 text-center"><div class="text-[32px]">◆</div><div class="mt-2 text-[22px]">Inbox zero.</div><div class="mt-2 text-sm text-mute">Nothing left to decide today.</div></div>') +
+    '</div>';
+};
+
+V.next = () => {
+  const all = by('next');
+  const tabs = ['all'].concat(CONTEXTS);
+  const shown = ctxFilter === 'all' ? CONTEXTS : [ctxFilter];
+  return head('Next Actions', null, '<div class="num text-dim self-center">' + all.length + ' actions · ' + CONTEXTS.length + ' contexts</div>') +
+    '<div class="flex gap-6 px-14 pt-6 border-b border-line flex-none overflow-x-auto">' +
+      tabs.map(t => {
+        const on = t === ctxFilter;
+        const n = t === 'all' ? all.length : all.filter(i => i.context === t).length;
+        return '<button data-ctx="' + t + '" class="pb-3 flex items-center gap-2 text-sm whitespace-nowrap border-b-2 ' +
+          (on ? 'border-ink text-ink' : 'border-transparent text-mute hover:text-ink') + '"><span>' +
+          (t === 'all' ? 'All' : t) + '</span><span class="num text-faint">' + n + '</span></button>';
+      }).join('') +
+    '</div>' +
+    '<div class="flex-1 overflow-y-auto scroll"><div class="grid ' + (shown.length > 1 ? 'grid-cols-3' : 'grid-cols-1') + '">' +
+      shown.map(c => {
+        const list = all.filter(i => i.context === c);
+        return '<div class="border-r border-b border-line px-[34px] py-8 flex flex-col min-w-0">' +
+          '<div class="flex items-baseline justify-between pb-4"><div class="lbl text-accent">◆ ' + c + '</div><div class="num text-faint" style="color:oklch(0.55 0.16 30)">' + list.length + '</div></div>' +
+          (list.length ? list.map(i =>
+            '<div class="flex gap-3 py-3 px-2.5 border border-transparent border-t border-line2 rounded hover:bg-canvas transition-colors group">' +
+              '<button data-act="done" data-id="' + i.id + '" class="w-5 h-5 flex items-center justify-center border border-green-500 bg-green-50 text-green-600 flex-none hover:bg-green-600 hover:text-white transition-all rounded-sm" title="Complete">✓</button>' +
+              '<div class="flex-1 min-w-0">' +
+                '<div class="text-sm leading-snug" style="text-wrap:pretty">' + esc(i.action || i.text) + '</div>' +
+                (i.duration ? '<div class="mt-0.5 num text-faint">⧖ ' + i.duration + ' min</div>' : '') +
+                (i.dueTime ? '<div class="mt-0.5 num text-faint">⏰ ' + esc(i.dueTime) + '</div>' : '') +
+                '<div class="mt-1.5 num text-faint">' + (i.origin ? '■ from: ' + esc(i.origin) : '—') + '</div>' +
+                '<div class="mt-2 flex gap-1">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+              '</div>' +
+              '<div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">' +
+                '<button data-act="details" data-id="' + i.id + '" class="w-4 h-4 flex items-center justify-center text-blue-500 hover:text-blue-700 transition-colors flex-none text-xs" title="Edit details">✎</button>' +
+                '<button data-act="del" data-id="' + i.id + '" class="w-4 h-4 flex items-center justify-center text-red-500 hover:text-red-700 transition-colors flex-none" title="Delete">✕</button>' +
+              '</div>' +
+            '</div>').join('')
+            : '<div class="py-6 num text-faint text-center">empty</div>') +
+        '</div>';
+      }).join('') +
+    '</div></div>';
+};
+
+V.calendar = () => {
+  const list = by('calendar');
+  return head('Calendar', 'Only time-specific actions live here. Nothing else.') +
+    '<div class="flex-1 overflow-y-auto scroll px-14 py-8">' +
+      (list.length ? list.map(i =>
+        '<div class="flex items-start gap-6 py-[18px] px-4 border border-transparent border-b border-line2 rounded hover:bg-canvas transition-colors group">' +
+          '<div class="num text-ink w-[92px] flex-none font-bold" style="color:oklch(0.55 0.16 30)">▢ ' + esc(i.when || '—') + '</div>' +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="text-[15px]">' + esc(i.action || i.text) + '</div>' +
+            (i.duration ? '<div class="mt-1 num text-faint">⧖ ' + i.duration + ' min</div>' : '') +
+            (i.dueTime ? '<div class="mt-1 num text-faint">⏰ ' + esc(i.dueTime) + '</div>' : '') +
+            (i.notes ? '<div class="mt-1 text-[12px] text-body bg-canvas px-2 py-1 rounded">📝 ' + esc(i.notes) + '</div>' : '') +
+            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+          '</div>' +
+          '<div class="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
+            '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors rounded">✎ Edit</button>' +
+            '<button data-act="done" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-green-500 bg-green-50 text-green-600 hover:bg-green-600 hover:text-white transition-colors rounded">✓ done</button>' +
+            '<button data-act="del" data-id="' + i.id + '" class="w-4 h-4 flex items-center justify-center text-red-500 hover:text-red-700 transition-colors" title="Delete">✕</button>' +
+          '</div>' +
+        '</div>').join('')
+        : '<div class="py-20 text-center"><div class="text-[22px]">▢ Nothing scheduled</div><div class="mt-2 text-sm text-mute">Your calendar is clear.</div></div>') +
+    '</div>';
+};
+
+V.waiting = () => {
+  const list = by('waiting');
+  return head('Waiting On', 'Delegated items stay visible until they come back.') +
+    '<div class="flex-1 overflow-y-auto scroll px-14 py-8">' +
+      (list.length ? list.map(i =>
+        '<div class="flex items-start gap-6 py-[18px] px-4 border border-transparent border-b border-line2 rounded hover:bg-canvas transition-colors group">' +
+          '<div class="num text-mute flex-none w-[110px]" style="color:#FF6B6B">⌛ ' + esc(i.who || 'someone') + '</div>' +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="text-[15px]">' + esc(i.action || i.text) + '</div>' +
+            (i.duration ? '<div class="mt-1 num text-faint">⧖ ' + i.duration + ' min</div>' : '') +
+            (i.dueTime ? '<div class="mt-1 num text-faint">⏰ ' + esc(i.dueTime) + '</div>' : '') +
+            (i.notes ? '<div class="mt-1 text-[12px] text-body bg-canvas px-2 py-1 rounded">📝 ' + esc(i.notes) + '</div>' : '') +
+            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+          '</div>' +
+          '<div class="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
+            '<div class="num text-faint">since ' + esc(i.since || age(i.created)) + '</div>' +
+            '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors rounded">✎ Edit</button>' +
+            '<button data-act="done" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-green-500 bg-green-50 text-green-600 hover:bg-green-600 hover:text-white transition-colors rounded">✓ got it</button>' +
+            '<button data-act="del" data-id="' + i.id + '" class="w-4 h-4 flex items-center justify-center text-red-500 hover:text-red-700 transition-colors" title="Delete">✕</button>' +
+          '</div>' +
+        '</div>').join('')
+        : '<div class="py-20 text-center"><div class="text-[22px]">◦ Nothing outstanding</div><div class="mt-2 text-sm text-mute">All delegated items settled.</div></div>') +
+    '</div>';
+};
+
+V.someday = () => {
+  const list = by('someday');
+  return head('Someday / Maybe', 'Reviewed on the first of every month.',
+      btn('Run monthly review', 'data-act="monthly"')) +
+    '<div class="flex-1 overflow-y-auto scroll px-14 py-8">' +
+      (list.length ? list.map(i =>
+        '<div class="flex items-start gap-6 py-[18px] px-4 border border-transparent border-b border-line2 rounded hover:bg-canvas transition-colors group">' +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="text-[15px]">' + esc(i.text) + '</div>' +
+            (i.duration ? '<div class="mt-1 num text-faint">⧖ ' + i.duration + ' min</div>' : '') +
+            (i.dueTime ? '<div class="mt-1 num text-faint">⏰ ' + esc(i.dueTime) + '</div>' : '') +
+            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+          '</div>' +
+          '<div class="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
+            '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors rounded">✎ Edit</button>' +
+            '<button data-act="reactivate" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-purple-500 bg-purple-50 text-purple-600 hover:bg-purple-600 hover:text-white transition-colors rounded">↩ inbox</button>' +
+            '<button data-act="del" data-id="' + i.id + '" class="w-4 h-4 flex items-center justify-center text-red-500 hover:text-red-700 transition-colors" title="Delete">✕</button>' +
+          '</div>' +
+        '</div>').join('')
+        : '<div class="py-20 text-center"><div class="text-[22px]">✧ Empty</div><div class="mt-2 text-sm text-mute">Nothing for later right now.</div></div>') +
+    '</div>';
+};
+
+V.reference = () => {
+  const list = by('reference');
+  return head('Reference', 'Useful, but not actionable.') +
+    '<div class="flex-1 overflow-y-auto scroll px-14 py-8">' +
+      (list.length ? list.map(i =>
+        '<div class="flex items-start gap-6 py-[18px] px-4 border border-transparent border-b border-line2 rounded hover:bg-canvas transition-colors group">' +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="text-[15px]">' + esc(i.text) + '</div>' +
+            (i.notes ? '<div class="mt-1 text-[12px] text-body bg-canvas px-2 py-1 rounded">📝 ' + esc(i.notes) + '</div>' : '') +
+            '<div class="mt-2 flex gap-2">' + statusBadge(i.status, i.context, i.who, i.when) + '</div>' +
+          '</div>' +
+          '<div class="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity flex-none">' +
+            '<div class="num text-faint">■ filed ' + age(i.created) + ' ago</div>' +
+            '<button data-act="details" data-id="' + i.id + '" class="px-2.5 py-1 text-[12px] border border-blue-500 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors rounded">✎ Edit</button>' +
+            '<button data-act="del" data-id="' + i.id + '" class="w-4 h-4 flex items-center justify-center text-red-500 hover:text-red-700 transition-colors" title="Delete">✕</button>' +
+          '</div>' +
+        '</div>').join('')
+        : '<div class="py-20 text-center"><div class="text-[22px]">▬ Empty</div><div class="mt-2 text-sm text-mute">No reference items yet.</div></div>') +
+    '</div>';
+};
+
+function render() {
+  renderNav();
+  document.getElementById('main').innerHTML = (V[view] || V.inbox)();
+  const cap = document.querySelector('[data-act="capture"] input');
+  if (cap) cap.focus();
+}
+
+/* ══════════════════════════ processing ══════════════════════════ */
+const RULES = [
+  ['01', 'Do it now', 'If the action takes under 2 minutes, do it immediately rather than tracking it.'],
+  ['02', 'Calendar', 'Time-specific actions go on the calendar and nowhere else.'],
+  ['03', 'Waiting On', 'Delegated items stay visible on their own list until they come back.'],
+  ['04', 'Context list', 'Everything else goes to @Work PC, @Store, @Home, and so on.'],
+  ['05', 'Someday / Maybe', 'Reviewed on the first of every month for anything worth reactivating.']
+];
+
+let P = null;
+
+function startProcessing() {
+  const queue = by('inbox').sort((a, b) => a.created - b.created).map(i => i.id);
+  if (!queue.length) { view = 'inbox'; render(); return; }
+  P = { queue, i: 0, step: 1, total: queue.length, stats: { quick: 0, next: 0, deleted: 0, filed: 0 }, action: '' };
+  document.getElementById('proc').classList.remove('hidden');
+  document.getElementById('proc').classList.add('flex');
+  document.getElementById('procRules').innerHTML = RULES.map(r =>
+    '<div class="flex gap-4 py-[15px] border-b border-line/70"><div class="num text-faint flex-none w-[22px] leading-relaxed">' + r[0] + '</div>' +
+    '<div class="min-w-0"><div class="text-sm">' + r[1] + '</div>' +
+    '<div class="mt-1 text-[13px] leading-snug text-mute" style="text-wrap:pretty">' + r[2] + '</div></div></div>').join('');
+  renderProc();
+}
+
+function endProcessing() {
+  P = null;
+  document.getElementById('proc').classList.add('hidden');
+  document.getElementById('proc').classList.remove('flex');
+  view = 'inbox';
+  render();
+}
+
+const opt = (title, note, attr, primary, dashed) =>
+  '<button ' + attr + ' class="text-left p-5 border ' +
+  (primary ? 'bg-ink border-ink text-paper' : 'bg-paper text-ink ' + (dashed ? 'border-dashed border-rule' : 'border-rule') + ' hover:bg-canvas') + '">' +
+  '<div class="text-[17px]">' + title + '</div>' +
+  '<div class="mt-1.5 text-[13px] ' + (primary ? 'opacity-60' : 'text-mute') + '">' + note + '</div></button>';
+
+function renderProc() {
+  if (!P) return;
+  if (P.i >= P.queue.length) { endProcessing(); return; }
+  const it = items.find(x => x.id === P.queue[P.i]);
+  if (!it) { P.i++; return renderProc(); }
+
+  document.getElementById('procCount').textContent =
+    String(P.i + 1).padStart(2, '0') + ' / ' + String(P.total).padStart(2, '0');
+  document.getElementById('procBar').style.width = (P.i / P.total * 100) + '%';
+  document.getElementById('procStats').innerHTML =
+    [['Done in 2 min', P.stats.quick], ['To next actions', P.stats.next], ['Filed away', P.stats.filed], ['Deleted', P.stats.deleted]]
+    .map(r => '<div class="flex justify-between"><span>' + r[0] + '</span><span class="font-mono">' + r[1] + '</span></div>').join('');
+
+  const stamp = new Date(it.created).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  const header =
+    '<div class="lbl text-accent">Captured ' + stamp + '</div>' +
+    '<h2 class="mt-[22px] mb-0 text-[46px] leading-[1.15] tracking-[-0.03em] font-normal max-w-[640px]" style="text-wrap:pretty">' + esc(it.text) + '</h2>';
+
+  let bodyHtml;
+  if (P.step === 1) {
+    bodyHtml = header +
+      '<div class="mt-[52px] flex flex-col gap-3.5 max-w-[640px]">' +
+        '<div class="lbl text-label">Is this actionable, or useful?</div>' +
+        '<div class="grid grid-cols-2 gap-3">' +
+          opt('Actionable', 'Clarify the next physical action', 'data-p="actionable"', true) +
+          opt('Useful, not actionable', 'File to Reference', 'data-p="reference"') +
+          opt('Actionable, not yet', 'Someday / Maybe', 'data-p="someday"') +
+          opt('Neither', 'Delete it', 'data-p="delete"', false, true) +
+        '</div>' +
+        '<div class="flex gap-[18px] mt-2 num text-faint"><span>A actionable</span><span>U useful</span><span>S someday</span><span>⌫ delete</span></div>' +
+      '</div>';
+  } else {
+    bodyHtml = header +
+      '<div class="mt-10 flex flex-col gap-3.5 max-w-[680px]">' +
+        '<div class="lbl text-label">What is the next physical action?</div>' +
+        '<input id="procAction" class="border border-ink px-4 py-3.5 text-base w-full" placeholder="Call Brother support with the serial number" value="' + esc(P.action) + '">' +
+        '<div class="lbl text-label mt-5">Where does it go?</div>' +
+        '<div class="flex flex-wrap gap-2">' +
+          '<button data-d="now" class="px-4 py-2.5 text-[13px] text-paper" style="background:oklch(0.55 0.16 30)">Under 2 min → do it now</button>' +
+          CONTEXTS.map(c => '<button data-d="ctx" data-c="' + c + '" class="px-4 py-2.5 text-[13px] border border-rule hover:bg-canvas">' + c + '</button>').join('') +
+          '<button data-d="cal" class="px-4 py-2.5 text-[13px] border border-rule hover:bg-canvas">Time-specific → Calendar</button>' +
+          '<button data-d="wait" class="px-4 py-2.5 text-[13px] border border-rule hover:bg-canvas">Delegated → Waiting On</button>' +
+        '</div>' +
+        '<button data-d="back" class="self-start mt-4 num text-faint hover:text-ink">← back to step 1</button>' +
+      '</div>';
+  }
+  document.getElementById('procBody').innerHTML = bodyHtml;
+  const a = document.getElementById('procAction');
+  if (a) { a.focus(); a.setSelectionRange(a.value.length, a.value.length); }
+}
+
+function advance() { P.i++; P.step = 1; P.action = ''; save(); renderProc(); }
+
+document.getElementById('proc').addEventListener('click', (e) => {
+  const s1 = e.target.closest('[data-p]'), s2 = e.target.closest('[data-d]');
+  if (!P) return;
+  const it = items.find(x => x.id === P.queue[P.i]);
+  if (s1) {
+    const p = s1.dataset.p;
+    if (p === 'actionable') { P.step = 2; P.action = it.text; return renderProc(); }
+    if (p === 'reference') { it.status = 'reference'; P.stats.filed++; }
+    if (p === 'someday') { it.status = 'someday'; P.stats.filed++; }
+    if (p === 'delete') { items = items.filter(x => x.id !== it.id); P.stats.deleted++; }
+    return advance();
+  }
+  if (s2) {
+    const d = s2.dataset.d;
+    if (d === 'back') { P.step = 1; return renderProc(); }
+    const field = document.getElementById('procAction');
+    it.action = (field && field.value.trim()) || it.text;
+    it.origin = it.text;
+    if (d === 'now') { items = items.filter(x => x.id !== it.id); P.stats.quick++; }
+    if (d === 'ctx') { it.status = 'next'; it.context = s2.dataset.c; P.stats.next++; }
+    if (d === 'cal') {
+      const when = prompt('When? (e.g. Thu 11:00)', 'Thu 11:00');
+      if (when === null) return;
+      it.status = 'calendar'; it.when = when; P.stats.filed++;
+    }
+    if (d === 'wait') {
+      const who = prompt('Waiting on whom?', '');
+      if (who === null) return;
+      it.status = 'waiting'; it.who = who || 'someone'; it.since = 'today'; P.stats.filed++;
+    }
+    return advance();
+  }
+});
+
+document.getElementById('procExit').addEventListener('click', endProcessing);
+
+/* ══════════════════════════ modal confirmation ══════════════════════════ */
+let pendingAction = null;
+
+function showConfirmModal(title, text, callback) {
+  pendingAction = callback;
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalText').textContent = text;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+function hideModal() {
+  document.getElementById('modal').classList.add('hidden');
+  pendingAction = null;
+}
+
+document.getElementById('modalConfirm').addEventListener('click', () => {
+  if (pendingAction) pendingAction();
+  hideModal();
+});
+
+document.getElementById('modalCancel').addEventListener('click', hideModal);
+
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('modal').classList.contains('hidden')) {
+    if (e.key === 'Escape') hideModal();
+    if (e.key === 'Enter') document.getElementById('modalConfirm').click();
+  }
+  if (!document.getElementById('detailsModal').classList.contains('hidden')) {
+    if (e.key === 'Escape') closeDetailsModal();
+  }
+});
+
+/* ══════════════════════════ contexts management ══════════════════════════ */
+const saveContexts = () => localStorage.setItem(CONTEXTS_KEY, JSON.stringify(CONTEXTS));
+
+function renderContextsList() {
+  document.getElementById('contextsList').innerHTML = CONTEXTS.map((ctx, i) =>
+    '<div class="flex items-center gap-3 py-2.5 border-b border-line2"><input class="flex-1 border border-rule px-3 py-2 text-[13px]" value="' + esc(ctx) + '" data-ctx-index="' + i + '" id="ctx-' + i + '">' +
+    '<button class="px-3 py-1.5 text-[13px] border border-rule hover:bg-canvas" data-save-ctx="' + i + '">Save</button>' +
+    '<button class="px-3 py-1.5 text-[13px] border border-rule text-accent hover:bg-canvas" data-remove-ctx="' + i + '">Remove</button></div>'
+  ).join('');
+}
+
+function openContextsModal() {
+  renderContextsList();
+  document.getElementById('contextsModal').classList.remove('hidden');
+  document.getElementById('newContextInput').focus();
+}
+
+function closeContextsModal() {
+  document.getElementById('contextsModal').classList.add('hidden');
+}
+
+document.getElementById('settingsBtn').addEventListener('click', openContextsModal);
+document.getElementById('contextsClose').addEventListener('click', closeContextsModal);
+
+document.getElementById('clearDataBtn').addEventListener('click', () => {
+  if (confirm('Are you sure? This will delete ALL tasks and cannot be undone.')) {
+    localStorage.removeItem(KEY);
+    items = [];
+    showNotification('All data cleared', 'success');
+    save(); render();
+  }
+});
+
+document.getElementById('addContextBtn').addEventListener('click', () => {
+  const input = document.getElementById('newContextInput');
+  const val = input.value.trim();
+  if (!val) return;
+  if (!CONTEXTS.some(c => c.toLowerCase() === val.toLowerCase())) {
+    CONTEXTS.push(val);
+    saveContexts();
+    renderContextsList();
+    input.value = '';
+    input.focus();
+    render();
+  }
+});
+
+document.getElementById('newContextInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('addContextBtn').click();
+});
+
+document.getElementById('contextsList').addEventListener('click', (e) => {
+  const saveBtn = e.target.closest('[data-save-ctx]');
+  if (saveBtn) {
+    const i = parseInt(saveBtn.dataset.saveCtx);
+    const newVal = document.getElementById('ctx-' + i).value.trim();
+    if (newVal && !CONTEXTS.some((c, idx) => idx !== i && c.toLowerCase() === newVal.toLowerCase())) {
+      CONTEXTS[i] = newVal;
+      saveContexts();
+      renderContextsList();
+      render();
+    }
+  }
+  
+  const removeBtn = e.target.closest('[data-remove-ctx]');
+  if (removeBtn) {
+    const i = parseInt(removeBtn.dataset.removeCtx);
+    const ctx = CONTEXTS[i];
+    showConfirmModal('Remove Context?', `Remove "${ctx}" from your contexts?`, () => {
+      CONTEXTS.splice(i, 1);
+      saveContexts();
+      renderContextsList();
+      render();
+    });
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('contextsModal').classList.contains('hidden')) {
+    if (e.key === 'Escape') closeContextsModal();
+  }
+});
+
+/* ══════════════════════════ notifications ══════════════════════════ */
+function showNotification(message, type = 'info') {
+  const container = document.getElementById('notifications');
+  const colors = { success: 'bg-green-50 border-green-300 text-green-800', error: 'bg-red-50 border-red-300 text-red-800', info: 'bg-blue-50 border-blue-300 text-blue-800', urgent: 'bg-orange-50 border-orange-400 text-orange-900' };
+  const notif = document.createElement('div');
+  notif.className = 'border-l-4 px-4 py-3 rounded text-[13px] ' + colors[type];
+  notif.textContent = message;
+  container.appendChild(notif);
+  setTimeout(() => notif.remove(), 4000);
+}
+
+/* ══════════════════════════ task details modal ══════════════════════════ */
+let editingTaskId = null;
+
+function openDetailsModal(taskId) {
+  const item = items.find(i => i.id === taskId);
+  if (!item) return;
+  editingTaskId = taskId;
+  document.getElementById('detailsTitle').textContent = 'Edit: ' + item.text.substring(0, 40);
+  document.getElementById('detailsDuration').value = item.duration || '';
+  document.getElementById('detailsDue').value = item.dueTime || '';
+  document.getElementById('detailsNotes').value = item.notes || '';
+  
+  // Set priority buttons
+  document.querySelectorAll('[id^="priority"]').forEach(btn => btn.classList.remove('bg-opacity-0'));
+  const priority = item.priority || 'normal';
+  document.getElementById('priority' + priority.charAt(0).toUpperCase() + priority.slice(1))?.classList.add('bg-opacity-0');
+  
+  // Render subtasks
+  renderSubtasksList(item.subtasks || []);
+  
+  document.getElementById('detailsModal').classList.remove('hidden');
+}
+
+function closeDetailsModal() {
+  document.getElementById('detailsModal').classList.add('hidden');
+  editingTaskId = null;
+}
+
+function renderSubtasksList(subtasks) {
+  const container = document.getElementById('subtasksList');
+  container.innerHTML = subtasks.map((s, i) =>
+    '<div class="flex items-center gap-2 bg-canvas px-3 py-2 rounded border border-line2">' +
+      '<span class="flex-1 text-[13px]">' + esc(s) + '</span>' +
+      '<button data-remove-subtask="' + i + '" class="text-red-500 hover:text-red-700 text-sm">✕</button>' +
+    '</div>'
+  ).join('');
+}
+
+// Priority button handlers
+['Urgent', 'High', 'Normal', 'Low'].forEach(p => {
+  const btn = document.getElementById('priority' + p);
+  if (btn) {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[id^="priority"]').forEach(b => b.style.opacity = '0.5');
+      btn.style.opacity = '1';
+    });
+  }
+});
+
+document.getElementById('addSubtaskBtn').addEventListener('click', () => {
+  const input = document.getElementById('newSubtaskInput');
+  const val = input.value.trim();
+  if (!val) return;
+  const container = document.getElementById('subtasksList');
+  const subtasks = Array.from(container.querySelectorAll('[data-remove-subtask]')).map(el => 
+    el.parentElement.textContent.replace('✕', '').trim()
+  );
+  subtasks.push(val);
+  renderSubtasksList(subtasks);
+  input.value = '';
+  input.focus();
+});
+
+document.getElementById('subtasksList').addEventListener('click', (e) => {
+  const removeBtn = e.target.closest('[data-remove-subtask]');
+  if (removeBtn) {
+    const i = parseInt(removeBtn.dataset.removeSubtask);
+    const container = document.getElementById('subtasksList');
+    const subtasks = Array.from(container.querySelectorAll('[data-remove-subtask]')).map(el => 
+      el.parentElement.textContent.replace('✕', '').trim()
+    );
+    subtasks.splice(i, 1);
+    renderSubtasksList(subtasks);
+  }
+});
+
+document.getElementById('detailsSave').addEventListener('click', () => {
+  if (!editingTaskId) return;
+  const item = items.find(i => i.id === editingTaskId);
+  if (!item) return;
+  
+  item.priority = document.querySelectorAll('[id^="priority"]').find(b => b.style.opacity !== '0.5')?.id.replace('priority', '').toLowerCase() || 'normal';
+  item.duration = parseInt(document.getElementById('detailsDuration').value) || null;
+  item.dueTime = document.getElementById('detailsDue').value || '';
+  item.notes = document.getElementById('detailsNotes').value || '';
+  
+  const container = document.getElementById('subtasksList');
+  item.subtasks = Array.from(container.querySelectorAll('[data-remove-subtask]')).map(el =>
+    el.parentElement.textContent.replace('✕', '').trim()
+  );
+  
+  showNotification('Task updated!', 'success');
+  save(); render(); closeDetailsModal();
+});
+
+document.getElementById('detailsCancel').addEventListener('click', closeDetailsModal);
+document.addEventListener('click', (e) => {
+  const go = e.target.closest('[data-go]');
+  if (go) {
+    const v = go.dataset.go;
+    if (v === 'processing') { startProcessing(); return; }
+    view = v; render(); return;
+  }
+  const ctx = e.target.closest('[data-ctx]');
+  if (ctx) { ctxFilter = ctx.dataset.ctx; render(); return; }
+
+  const act = e.target.closest('[data-act]');
+  if (!act || act.tagName === 'FORM') return;
+  const a = act.dataset.act, id = act.dataset.id;
+  
+  if (a === 'details') {
+    openDetailsModal(id);
+    return;
+  }
+  
+  if (a === 'del') {
+    const item = items.find(x => x.id === id);
+    showConfirmModal('Delete Item?', `"${item.text}" will be permanently deleted.`, () => {
+      items = items.filter(x => x.id !== id);
+      showNotification('Item deleted', 'success');
+      save(); render();
+    });
+    return;
+  }
+  
+  if (a === 'done') {
+    const item = items.find(x => x.id === id);
+    showConfirmModal('Mark as Completed?', `"${item.text}" will be completed and removed.`, () => {
+      items = items.filter(x => x.id !== id);
+      showNotification('✓ Task completed!', 'success');
+      save(); render();
+    });
+    return;
+  }
+  
+  if (a === 'reactivate') { const i = items.find(x => x.id === id); i.status = 'inbox'; i.created = Date.now(); }
+  if (a === 'archiveAll') { if (!confirm('Move all inbox items to Reference?')) return; by('inbox').forEach(i => i.status = 'reference'); }
+  if (a === 'monthly') { view = 'someday'; alert('Monthly review: work down the list and send anything live back to the inbox.'); }
+  save(); render();
+});
+
+document.addEventListener('submit', (e) => {
+  const f = e.target.closest('[data-act="capture"]');
+  if (!f) return;
+  e.preventDefault();
+  const v = f.text.value.trim();
+  if (!v) return;
+  items.unshift(mk({ text: v }));
+  f.reset();
+  save(); render();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (P) {
+    if (e.key === 'Escape') return endProcessing();
+    if (P.step === 1) {
+      const k = e.key.toLowerCase();
+      const m = { a: 'actionable', u: 'reference', s: 'someday' }[k];
+      if (m) { e.preventDefault(); document.querySelector('[data-p="' + m + '"]').click(); }
+      if (e.key === 'Backspace') { e.preventDefault(); document.querySelector('[data-p="delete"]').click(); }
+    }
+    return;
+  }
+  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+  if (e.key.toLowerCase() === 'c' && !typing) {
+    e.preventDefault();
+    if (view !== 'inbox') { view = 'inbox'; render(); }
+    const f = document.querySelector('[data-act="capture"] input');
+    if (f) f.focus();
+  }
+  if (e.key.toLowerCase() === 'p' && !typing) { e.preventDefault(); startProcessing(); }
+});
+
+render();
+</script>
+</body>
+</html>
