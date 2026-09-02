@@ -46,6 +46,141 @@ tailwind.config = {
   .scroll { scrollbar-width: thin; scrollbar-color: #D8D8D3 transparent; }
   .scroll::-webkit-scrollbar { width: 8px; }
   .scroll::-webkit-scrollbar-thumb { background: #D8D8D3; }
+  
+  /* ───────── responsive ───────── */
+  #app { flex-direction: row; }
+  #sidebar { width: 240px; }
+  main { flex: 1; }
+  #mobileHeader, #sidebarBackdrop { display: none; }
+  
+  /* Mobile (under 768px) */
+  @media (max-width: 767px) {
+    html, body { height: 100%; overflow: hidden; }
+    #app { height: 100dvh; min-height: 100%; }
+    #mobileHeader { display:flex; flex:none; min-height:56px; align-items:center; justify-content:space-between; padding:0 16px; border-bottom:1px solid #E3E3DF; background:white; z-index:30; }
+    
+    #sidebarToggle { 
+      display: flex !important; 
+      position: fixed;
+      top: 8px; left: 12px; bottom: auto;
+      z-index: 60;
+      width: 40px; height: 40px;
+      border-radius: 0;
+    }
+    #sidebarBackdrop { position:fixed; inset:0; z-index:40; background:rgb(10 10 10 / 42%); }
+    #sidebarBackdrop.open { display:block; }
+    
+    #sidebar { 
+      display: flex !important;
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: min(86vw, 320px);
+      height: 100dvh;
+      background: white;
+      z-index: 50;
+      flex-direction: column;
+      border-right: 1px solid #E3E3DF;
+      padding: 20px 0; overflow-y:auto;
+      transform:translateX(-105%); transition:transform 180ms ease;
+      box-shadow:16px 0 40px rgb(10 10 10 / 12%);
+    }
+    
+    #sidebar.open { transform:translateX(0); }
+    
+    #app { flex-direction: column; }
+    main { flex: 1; min-width: 0; min-height: 0; }
+    
+    #nav { flex-direction:column; overflow:visible; }
+    #nav button { padding:12px 10px; font-size:14px; }
+    
+    .px-14 { padding-left: 16px; padding-right: 16px; }
+    .px-20 { padding-left: 16px; padding-right: 16px; }
+    .pt-\[42px\] { padding-top: 16px; }
+    .pb-6 { padding-bottom: 12px; }
+    
+    h2 { font-size: 24px; }
+    
+    button { padding: 8px 12px; font-size: 12px; }
+    
+    .w-\[240px\] { width: 100%; }
+    .w-\[400px\] { width: 100%; max-width: 100%; }
+    .max-w-\[400px\] { max-width: 90vw; }
+    .max-w-\[540px\] { max-width: 90vw; }
+    .max-w-\[600px\] { max-width: 90vw; }
+    
+    .gap-6 { gap: 12px; }
+    .gap-5 { gap: 10px; }
+    .gap-4 { gap: 8px; }
+    
+    input, textarea { font-size: 16px; }
+    
+    .lbl { font-size: 10px; }
+    .num { font-size: 10px; }
+    
+    .mx-\[22px\] { margin-left: 12px; margin-right: 12px; }
+    
+    /* Sidebar sections */
+    .mt-auto { margin-top: 0; order: 10; }
+    
+    /* Hide long text on mobile */
+    .truncate { max-width: 120px; }
+    
+    .text-\[32px\] { font-size: 20px; }
+    .text-\[22px\] { font-size: 18px; }
+    .text-\[20px\] { font-size: 18px; }
+    .text-\[15px\] { font-size: 14px; }
+    .text-sm { font-size: 12px; }
+    
+    #notifications { max-width: 85vw; top: 8px; right: 8px; }
+    #proc > div:first-child { padding:14px 16px; gap:12px; }
+    #procBar { max-width:90px; }
+    #proc > .flex-1 { flex-direction:column; }
+    #procBody { padding:28px 16px; border-right:0; overflow-y:auto; justify-content:flex-start; }
+    #procBody .grid-cols-2 { grid-template-columns:1fr; }
+    #procBody h2 { font-size:30px; }
+    #proc aside { display:none; }
+  }
+  
+  /* Tablet (768px to 1024px) */
+  @media (min-width: 768px) and (max-width: 1024px) {
+    #sidebar { width: 180px; }
+    .px-14 { padding-left: 12px; padding-right: 12px; }
+    .px-20 { padding-left: 12px; padding-right: 12px; }
+    h2 { font-size: 26px; }
+    
+    .grid-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .w-\[400px\] { width: 100%; }
+    .max-w-\[600px\] { max-width: 95vw; }
+  }
+  
+  /* Desktop (1025px and above) */
+  @media (min-width: 1025px) {
+    #sidebar { width: 240px; }
+  }
+  
+  /* Modal responsive */
+  @media (max-width: 767px) {
+    #modal > div,
+    #contextsModal > div,
+    #detailsModal > div {
+      max-width: 90vw !important;
+      margin: 16px !important;
+      max-height: 80vh !important;
+      overflow-y: auto !important;
+    }
+    
+    #detailsModal {
+      align-items: flex-end !important;
+      justify-content: flex-end !important;
+    }
+    
+    #detailsModal > div {
+      margin: 0 !important;
+      border-radius: 16px 16px 0 0 !important;
+      max-height: 90vh !important;
+    }
+  }
 </style>
 </head>
 <body class="bg-paper font-sans text-ink antialiased">
@@ -54,9 +189,14 @@ tailwind.config = {
 <div id="notifications" class="fixed top-4 right-4 z-40 space-y-2 max-w-[400px]"></div>
 
 <div id="app" class="flex h-screen overflow-hidden">
+  <header id="mobileHeader">
+    <div class="lbl pl-12">Getting Things Done</div>
+  </header>
 
   <!-- ───────── sidebar ───────── -->
-  <aside class="w-[240px] flex-none border-r border-line flex flex-col py-7">
+  <button id="sidebarToggle" class="hidden fixed bottom-4 left-4 z-30 w-12 h-12 bg-ink text-paper rounded-full flex items-center justify-center text-lg hover:opacity-90 md:hidden">☰</button>
+  
+  <aside id="sidebar" class="w-[240px] flex-none border-r border-line flex flex-col py-7 md:flex hidden md:w-[240px]">
     <div class="px-[22px] pb-7 lbl">Getting&nbsp;Things&nbsp;Done</div>
     <nav id="nav" class="flex flex-col gap-px px-3"></nav>
     <div class="mt-auto mx-[22px] border border-line p-4">
@@ -72,6 +212,7 @@ tailwind.config = {
   </aside>
 
   <!-- ───────── main ───────── -->
+  <button id="sidebarBackdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>
   <main id="main" class="flex-1 flex flex-col min-w-0"></main>
 </div>
 
@@ -824,6 +965,67 @@ document.getElementById('detailsSave').addEventListener('click', () => {
 });
 
 document.getElementById('detailsCancel').addEventListener('click', closeDetailsModal);
+
+/* ══════════════════════════ mobile sidebar toggle ══════════════════════════ */
+const sidebarToggle = document.getElementById('sidebarToggle');
+const sidebar = document.getElementById('sidebar');
+let sidebarOpen = false;
+
+if (sidebarToggle) {
+  sidebarToggle.addEventListener('click', () => {
+    sidebarOpen = !sidebarOpen;
+    sidebar.style.display = sidebarOpen ? 'flex' : 'none';
+    sidebarToggle.textContent = sidebarOpen ? '✕' : '☰';
+  });
+}
+
+const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+
+sidebarToggle.setAttribute('aria-controls', 'sidebar');
+sidebarToggle.setAttribute('aria-expanded', 'false');
+sidebarToggle.setAttribute('aria-label', 'Open navigation');
+
+sidebarToggle.addEventListener('click', () => {
+  sidebar.classList.toggle('open', sidebarOpen);
+  sidebarBackdrop.classList.toggle('open', sidebarOpen);
+  sidebarToggle.setAttribute('aria-expanded', String(sidebarOpen));
+});
+
+sidebarBackdrop.addEventListener('click', () => {
+  sidebarOpen = false;
+  sidebar.style.removeProperty('display');
+  sidebar.classList.remove('open');
+  sidebarBackdrop.classList.remove('open');
+  sidebarToggle.innerHTML = '&#9776;';
+  sidebarToggle.setAttribute('aria-expanded', 'false');
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && sidebarOpen) sidebarBackdrop.click();
+});
+
+window.addEventListener('resize', () => {
+  if (window.innerWidth >= 768 && sidebarOpen) sidebarBackdrop.click();
+});
+
+// Close sidebar when navigation item clicked (mobile)
+document.addEventListener('click', (e) => {
+  if (sidebarOpen && e.target.closest('nav button')) {
+    sidebarOpen = false;
+    sidebar.style.display = 'none';
+    sidebarToggle.textContent = '☰';
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (!sidebarOpen && e.target.closest('nav button')) {
+    sidebar.style.removeProperty('display');
+    sidebar.classList.remove('open');
+    sidebarBackdrop.classList.remove('open');
+    sidebarToggle.setAttribute('aria-expanded', 'false');
+  }
+});
+
 document.addEventListener('click', (e) => {
   const go = e.target.closest('[data-go]');
   if (go) {
