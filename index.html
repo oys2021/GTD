@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GTD</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script>
@@ -73,6 +74,8 @@ tailwind.config = {
   #modal, #contextsModal, #detailsModal, #boxModal, #schedModal { animation: fadeIn .18s ease; }
   #modal > div, #contextsModal > div, #detailsModal > div, #boxModal > div, #schedModal > div { animation: modalIn .26s cubic-bezier(.2,.7,.2,1); }
   #notifPanel:not(.hidden) { display: flex; animation: pop .18s ease-out; }
+  #auth:not(.hidden) { display: flex; animation: fadeIn .3s ease; }
+  #auth form { animation: modalIn .4s cubic-bezier(.2,.7,.2,1); }
 
   /* deep work zone */
   @keyframes eq      { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
@@ -364,6 +367,27 @@ tailwind.config = {
 </head>
 <body class="bg-paper font-sans text-ink antialiased">
 
+<!-- ───────── sign in ───────── -->
+<div id="auth" class="hidden fixed inset-0 z-[85] items-center justify-center p-4 overflow-y-auto" style="background:radial-gradient(900px 500px at 15% 0%,rgba(124,92,252,.22),transparent 60%),radial-gradient(800px 500px at 100% 100%,rgba(59,130,246,.18),transparent 60%),#F7F7FB">
+  <form id="authForm" class="w-full max-w-[400px] bg-paper rounded-3xl border border-line p-8 shadow-[0_30px_80px_rgba(40,30,120,0.14)]">
+    <span class="w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-[0_10px_24px_rgba(108,92,231,0.4)]" style="background:linear-gradient(135deg,#7C5CFC,#3B82F6)">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>
+    </span>
+    <div id="authTitle" class="mt-5 text-[24px] font-bold tracking-[-0.02em]">Welcome back</div>
+    <div class="mt-1.5 text-[14px] text-mute">Sign in to keep your tasks safe in the cloud and in sync on every device.</div>
+    <label class="block mt-6 text-[12px] font-semibold text-label mb-2" for="authEmail">Email</label>
+    <input id="authEmail" type="email" autocomplete="email" required class="w-full border border-rule rounded-xl px-3.5 py-3 text-[14px]" placeholder="you@example.com">
+    <label class="block mt-4 text-[12px] font-semibold text-label mb-2" for="authPassword">Password</label>
+    <input id="authPassword" type="password" autocomplete="current-password" required minlength="6" class="w-full border border-rule rounded-xl px-3.5 py-3 text-[14px]" placeholder="At least 6 characters">
+    <div id="authError" class="hidden mt-3 text-[13px] rounded-xl px-3.5 py-2.5" style="color:#B42318;background:#FEF3F2"></div>
+    <button id="authSubmit" type="submit" class="mt-6 w-full rounded-xl bg-brand text-paper py-3 text-[15px] font-semibold hover:opacity-90 disabled:opacity-50 shadow-[0_10px_30px_rgba(108,92,231,0.3)]">Sign in</button>
+    <div class="mt-4 text-center text-[13px] text-mute"><span id="authSwitchText">New here?</span> <button id="authSwitch" type="button" class="font-semibold text-brand hover:underline">Create an account</button></div>
+    <div class="mt-6 pt-5 border-t border-line text-center">
+      <button id="authOffline" type="button" class="text-[12px] text-faint hover:text-ink">Continue without an account (saved on this device only)</button>
+    </div>
+  </form>
+</div>
+
 <!-- ───────── notifications ───────── -->
 <div id="notifications" class="fixed top-4 right-4 z-[80] space-y-2 max-w-[400px]"></div>
 
@@ -395,6 +419,7 @@ tailwind.config = {
     <nav id="nav" class="flex flex-col gap-px px-3 pb-5 flex-none"></nav>
     <div id="upNext" class="mt-auto flex-none mx-[18px] rounded-2xl p-4" style="background:linear-gradient(135deg,#EFEDFD,#E0F2FE)"></div>
     <div class="flex-none mx-[18px] mt-4 pt-4 border-t border-line">
+      <div id="account" class="mb-2"></div>
       <button id="soundToggle" role="switch" aria-checked="true" class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-sm text-mute hover:text-ink hover:bg-canvas">
         <span class="flex items-center gap-2">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6v4h2.6L8.6 13V3L5.1 6z"/><path d="M11 5.5a3.5 3.5 0 010 5M12.8 3.6a6 6 0 010 8.8"/></svg>
@@ -685,6 +710,7 @@ function logFinish(item, field) {
 const persist = () => {
   localStorage.setItem(KEY, JSON.stringify(items));
   localStorage.setItem(HISTORY_KEY, JSON.stringify(taskLog));
+  queueSync();
 };
 const save = () => {
   persist();
@@ -1318,7 +1344,7 @@ V.history = () => {
 const SOUND_KEY = 'gtd.sound.v1';
 let soundPrefs;
 try { soundPrefs = JSON.parse(localStorage.getItem(SOUND_KEY)) || { on: true, volume: 0.6 }; } catch (e) { soundPrefs = { on: true, volume: 0.6 }; }
-const saveSoundPrefs = () => localStorage.setItem(SOUND_KEY, JSON.stringify(soundPrefs));
+const saveSoundPrefs = () => { localStorage.setItem(SOUND_KEY, JSON.stringify(soundPrefs)); queueSync(); };
 
 let audioCtx = null, masterGain = null;
 function audio() {
@@ -1651,6 +1677,7 @@ function bankTime() {
   const today = ymd(new Date());
   focusLog[today] = (focusLog[today] || 0) + secs;
   localStorage.setItem(FOCUS_KEY, JSON.stringify(focusLog));
+  queueSync();
   timer.segStart = null;
 }
 
@@ -1838,9 +1865,9 @@ try { sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY)) || []; } catch (
 let zoneShown = false;
 let zoneDraft = { taskId: null, minutes: zonePrefs.minutes, intention: '' };
 
-const saveZonePrefs = () => localStorage.setItem(ZONE_PREF_KEY, JSON.stringify(zonePrefs));
+const saveZonePrefs = () => { localStorage.setItem(ZONE_PREF_KEY, JSON.stringify(zonePrefs)); queueSync(); };
 const saveZone = () => zone ? localStorage.setItem(ZONE_KEY, JSON.stringify(zone)) : localStorage.removeItem(ZONE_KEY);
-const saveSessions = () => localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+const saveSessions = () => { localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions)); queueSync(); };
 
 /* ── music ── */
 const music = { station: null, playing: false, status: 'Paused', el: null, noise: null, duck: 1 };
@@ -2373,7 +2400,7 @@ try { schedules = JSON.parse(localStorage.getItem(SCHED_KEY)); } catch (e) { sch
 if (!Array.isArray(schedules)) {
   schedules = [{ id: 's-process', title: 'Process inbox', days: [0, 1, 2, 3, 4, 5, 6], time: '16:00', minutes: 30, context: CONTEXTS[0] || '@Anywhere', remind: 10, active: true, lastCreated: null }];
 }
-const saveSchedules = () => localStorage.setItem(SCHED_KEY, JSON.stringify(schedules));
+const saveSchedules = () => { localStorage.setItem(SCHED_KEY, JSON.stringify(schedules)); queueSync(); };
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -2581,7 +2608,7 @@ Object.keys(fired).forEach(k => { if (Date.now() - fired[k] > 3 * 864e5) delete 
 
 const saveNotifs = () => localStorage.setItem(NOTIF_KEY, JSON.stringify(notifs));
 const saveFired = () => localStorage.setItem(FIRED_KEY, JSON.stringify(fired));
-const saveNotifSettings = () => localStorage.setItem(NOTIF_SET_KEY, JSON.stringify(notifSettings));
+const saveNotifSettings = () => { localStorage.setItem(NOTIF_SET_KEY, JSON.stringify(notifSettings)); queueSync(); };
 
 const chime = () => play('chime');
 
@@ -3231,7 +3258,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ══════════════════════════ contexts management ══════════════════════════ */
-const saveContexts = () => localStorage.setItem(CONTEXTS_KEY, JSON.stringify(CONTEXTS));
+const saveContexts = () => { localStorage.setItem(CONTEXTS_KEY, JSON.stringify(CONTEXTS)); queueSync(); };
 
 function renderContextsList() {
   document.getElementById('contextsList').innerHTML = CONTEXTS.map((ctx, i) =>
@@ -3255,7 +3282,7 @@ document.getElementById('settingsBtn').addEventListener('click', openContextsMod
 document.getElementById('contextsClose').addEventListener('click', closeContextsModal);
 
 document.getElementById('clearDataBtn').addEventListener('click', () => {
-  if (confirm('Are you sure? This will delete ALL tasks and cannot be undone.')) {
+  if (confirm('Are you sure? This will delete ALL tasks on this device and in your cloud account. It cannot be undone.')) {
     localStorage.removeItem(KEY);
     localStorage.removeItem(HISTORY_KEY);
     items = [];
@@ -3539,6 +3566,13 @@ document.addEventListener('click', (e) => {
   }
 
   if (a === 'notifOpen') { toggleNotifPanel(); return; }
+  if (a === 'authOpen') { showAuth(); return; }
+  if (a === 'signOut') { signOut(); return; }
+  if (a === 'syncInfo') {
+    if (syncState.state === 'error') { showNotification(syncState.note || 'Sync failed', 'error'); pushAll(); }
+    else showNotification(syncState.state === 'synced' ? 'All changes are saved to the cloud' : 'Syncing your changes…', 'info');
+    return;
+  }
   if (a === 'period' || a === 'periodShift') {
     const st = act.dataset.scope === 'history' ? historyPeriod : insightsPeriod;
     if (a === 'period') { st.unit = act.dataset.unit; st.offset = 0; }
@@ -3687,6 +3721,326 @@ document.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 'p' && !typing) { e.preventDefault(); startProcessing(); }
 });
 
+/* ══════════════════════════ cloud sync (Supabase) ══════════════════════════ */
+/* The browser copy stays the source the app reads from; every save is mirrored to Supabase.
+   The publishable key is meant to be public — Row Level Security (schema.sql) keeps each
+   account's rows private. */
+var SB_URL = 'https://tupbeznevlnodlxysnma.supabase.co';
+var SB_KEY = 'sb_publishable_locZQ4p1GP5XaXsBuqTlzQ_yoHUNwNO';
+var SYNC_META_KEY = 'gtd.sync.v1', OFFLINE_KEY = 'gtd.offline.v1';
+var sb = null, sbUser = null, syncTimer = null, syncBusy = false, syncAgain = false;
+var syncState = { state: 'local', note: '' };
+var synced = {}; // table -> Map(key -> JSON of the row last confirmed in the cloud)
+
+const iso = (ms) => ms ? new Date(ms).toISOString() : null;
+const ms = (s) => s ? Date.parse(s) : null;
+const clean = (o) => { Object.keys(o).forEach(k => (o[k] === null || o[k] === undefined) && delete o[k]); return o; };
+const syncMeta = () => { try { return JSON.parse(localStorage.getItem(SYNC_META_KEY)) || {}; } catch (e) { return {}; } };
+const setSyncMeta = (m) => localStorage.setItem(SYNC_META_KEY, JSON.stringify(Object.assign(syncMeta(), m)));
+
+/* app object ⇄ table row */
+const MAP = {
+  tasks: {
+    key: 'id',
+    toRow: (i) => ({
+      id: i.id, title: i.text || i.action || '', next_action: i.action || null, status: i.status || 'inbox',
+      context: i.context || null, priority: i.priority || null, duration_min: i.duration || null, due: i.dueTime || null,
+      notes: i.notes || null, subtasks: normSubs(i.subtasks), time_box: i.box || null, time_spent_sec: Math.round(i.timeSpent || 0),
+      // remind: null means "no reminder", so it's kept even when null
+      extra: Object.assign(clean({ when: i.when, who: i.who, since: i.since, origin: i.origin, source: i.source, scheduleId: i.scheduleId }), i.remind !== undefined ? { remind: i.remind } : {}),
+      created_at: iso(i.created) || new Date().toISOString()
+    }),
+    fromRow: (r) => Object.assign(clean({
+      id: r.id, text: r.title, action: r.next_action, status: r.status, context: r.context, priority: r.priority,
+      duration: r.duration_min, dueTime: r.due, notes: r.notes, subtasks: r.subtasks, box: r.time_box,
+      timeSpent: r.time_spent_sec || undefined, created: ms(r.created_at)
+    }), r.extra || {})
+  },
+  task_history: {
+    key: 'id',
+    toRow: (h) => ({ id: h.id, title: h.text || '', added_at: iso(h.added) || new Date().toISOString(), completed_at: iso(h.completed), deleted_at: iso(h.deleted), snapshot: h.snapshot || null }),
+    fromRow: (r) => clean({ id: r.id, text: r.title, added: ms(r.added_at), completed: ms(r.completed_at), deleted: ms(r.deleted_at), snapshot: r.snapshot })
+  },
+  schedules: {
+    key: 'id',
+    toRow: (s) => ({ id: s.id, title: s.title, days: s.days, start_time: s.time, minutes: s.minutes, context: s.context || null, remind_min: s.remind ?? null, active: !!s.active, last_created: s.lastCreated || null }),
+    fromRow: (r) => ({ id: r.id, title: r.title, days: r.days, time: r.start_time, minutes: r.minutes, context: r.context, remind: r.remind_min, active: r.active, lastCreated: r.last_created })
+  },
+  focus_sessions: {
+    key: 'id',
+    toRow: (s) => ({ id: s.id, task_id: s.taskId || null, title: s.text || null, started_at: iso(s.start) || new Date().toISOString(), ended_at: iso(s.end), planned_min: s.planned || null,
+      focused_sec: Math.round(s.focusedSec || 0), rating: s.rating || null, intention: s.intention || null, completed: !!s.completed, parked: s.parked || 0 }),
+    fromRow: (r) => clean({ id: r.id, taskId: r.task_id, text: r.title, start: ms(r.started_at), end: ms(r.ended_at), planned: r.planned_min, focusedSec: r.focused_sec,
+      rating: r.rating, intention: r.intention, completed: r.completed, parked: r.parked })
+  },
+  focus_log: {
+    key: 'day',
+    toRow: ([day, secs]) => ({ day, seconds: Math.round(secs) }),
+    fromRow: (r) => [r.day, r.seconds]
+  }
+};
+
+const localRows = {
+  tasks: () => items.map(MAP.tasks.toRow),
+  task_history: () => taskLog.map(MAP.task_history.toRow),
+  schedules: () => schedules.map(MAP.schedules.toRow),
+  focus_sessions: () => sessions.map(MAP.focus_sessions.toRow),
+  focus_log: () => Object.entries(focusLog).map(MAP.focus_log.toRow)
+};
+const settingsRow = () => ({ contexts: CONTEXTS, prefs: { sound: soundPrefs, zone: zonePrefs, notif: notifSettings } });
+
+// called by every save: mark the device copy as ahead of the cloud and push shortly
+function queueSync() {
+  if (!sbUser) return;
+  setSyncMeta({ dirty: true });
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(pushAll, 900);
+}
+
+async function pushAll() {
+  if (!sbUser) return;
+  if (syncBusy) { syncAgain = true; return; }
+  syncBusy = true;
+  setSyncState('syncing');
+  try {
+    for (const table of Object.keys(MAP)) {
+      const key = MAP[table].key, done = synced[table] || (synced[table] = new Map());
+      const rows = localRows[table](), seen = new Set(), changed = [];
+      rows.forEach(r => {
+        seen.add(r[key]);
+        const s = JSON.stringify(r);
+        if (done.get(r[key]) !== s) changed.push(Object.assign({ user_id: sbUser.id }, r));
+      });
+      const gone = [...done.keys()].filter(k => !seen.has(k));
+      for (let n = 0; n < changed.length; n += 200) {
+        const batch = changed.slice(n, n + 200);
+        const { error } = await sb.from(table).upsert(batch, { onConflict: 'user_id,' + key });
+        if (error) throw error;
+        batch.forEach(r => { const c = Object.assign({}, r); delete c.user_id; done.set(r[key], JSON.stringify(c)); });
+      }
+      if (gone.length) {
+        const { error } = await sb.from(table).delete().in(key, gone);
+        if (error) throw error;
+        gone.forEach(k => done.delete(k));
+      }
+    }
+    const s = JSON.stringify(settingsRow());
+    if (synced.settings !== s) {
+      const { error } = await sb.from('user_settings').upsert(Object.assign({ user_id: sbUser.id }, settingsRow()), { onConflict: 'user_id' });
+      if (error) throw error;
+      synced.settings = s;
+    }
+    setSyncMeta({ userId: sbUser.id, dirty: false });
+    setSyncState('synced');
+  } catch (e) {
+    setSyncState('error', describeSyncError(e));
+  } finally {
+    syncBusy = false;
+    if (syncAgain) { syncAgain = false; pushAll(); }
+  }
+}
+
+function describeSyncError(e) {
+  const msg = (e && (e.message || e.code)) || String(e);
+  if (/PGRST205|does not exist|schema cache/i.test(msg)) return 'Database tables are missing — run schema.sql in the Supabase SQL Editor.';
+  if (/Failed to fetch|NetworkError|network/i.test(msg)) return 'You’re offline — changes are saved on this device and will sync when you’re back.';
+  return msg;
+}
+
+// first sign-in on a device merges what's here with the cloud; after that the cloud is the source of truth
+async function pullAll() {
+  setSyncState('syncing');
+  const tables = Object.keys(MAP);
+  const results = await Promise.all(tables.map(t => sb.from(t).select('*')).concat([sb.from('user_settings').select('*').maybeSingle()]));
+  const err = results.find(r => r.error);
+  if (err) throw err.error;
+
+  const meta = syncMeta();
+  const keepLocal = !meta.userId || (meta.userId === sbUser.id && meta.dirty);
+  const server = {};
+  tables.forEach((t, n) => { server[t] = results[n].data.map(MAP[t].fromRow); });
+  const settings = results[tables.length].data;
+
+  const merge = (local, remote) => {
+    if (!keepLocal) return remote;
+    const byId = new Map(remote.map(x => [x.id, x]));
+    local.forEach(x => byId.set(x.id, x)); // this device's unsynced edits win
+    return [...byId.values()];
+  };
+  items = merge(items, server.tasks);
+  taskLog = merge(taskLog, server.task_history);
+  schedules = merge(schedules, server.schedules);
+  sessions = merge(sessions, server.focus_sessions).sort((a, b) => b.start - a.start);
+  const remoteFocus = Object.fromEntries(server.focus_log);
+  focusLog = keepLocal ? Object.assign(remoteFocus, Object.fromEntries(Object.keys(focusLog).map(d => [d, Math.max(focusLog[d], remoteFocus[d] || 0)]))) : remoteFocus;
+  if (settings) {
+    if (settings.contexts && settings.contexts.length) CONTEXTS = keepLocal ? [...new Set(settings.contexts.concat(CONTEXTS))] : settings.contexts;
+    const p = settings.prefs || {};
+    if (!keepLocal) {
+      if (p.sound) Object.assign(soundPrefs, p.sound);
+      if (p.zone) Object.assign(zonePrefs, p.zone);
+      if (p.notif) Object.assign(notifSettings, p.notif);
+    }
+  }
+
+  // remember exactly what the cloud holds, so the next push only sends differences
+  tables.forEach((t, n) => {
+    const key = MAP[t].key;
+    synced[t] = new Map(results[n].data.map(r => { const row = MAP[t].toRow(MAP[t].fromRow(r)); return [row[key], JSON.stringify(row)]; }));
+  });
+  synced.settings = settings ? JSON.stringify({ contexts: settings.contexts, prefs: settings.prefs }) : null;
+
+  localStorage.setItem(KEY, JSON.stringify(items));
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(taskLog));
+  localStorage.setItem(SCHED_KEY, JSON.stringify(schedules));
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  localStorage.setItem(FOCUS_KEY, JSON.stringify(focusLog));
+  localStorage.setItem(CONTEXTS_KEY, JSON.stringify(CONTEXTS));
+  setSyncMeta({ userId: sbUser.id });
+  runSchedules();
+  render();
+  renderSoundControls();
+  await pushAll(); // sends anything only this device had (e.g. tasks from before you signed in)
+  return keepLocal;
+}
+
+/* ── sync status in the sidebar ── */
+function setSyncState(state, note) {
+  syncState = { state, note: note || '' };
+  renderAccount();
+}
+
+function renderAccount() {
+  const el = document.getElementById('account');
+  if (!el) return;
+  if (!sbUser) {
+    el.innerHTML =
+      '<button data-act="authOpen" class="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-canvas">' +
+        '<span class="w-8 h-8 rounded-full bg-canvas text-mute flex items-center justify-center flex-none">' +
+          '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="5.5" r="2.8"/><path d="M2.8 14a5.2 5.2 0 0110.4 0"/></svg></span>' +
+        '<span class="min-w-0"><span class="block text-[13px] font-semibold text-ink">Sign in to sync</span><span class="block text-[11px] text-faint">Saved on this device only</span></span>' +
+      '</button>';
+    return;
+  }
+  const s = syncState.state;
+  const look = {
+    synced:  ['#16A34A', 'Synced to the cloud'],
+    syncing: ['#F59E0B', 'Syncing…'],
+    error:   ['#DC2626', 'Not synced — tap for details'],
+    local:   ['#A3A3AC', 'Connecting…']
+  }[s] || ['#A3A3AC', ''];
+  const email = sbUser.email || 'Signed in';
+  el.innerHTML =
+    '<div class="flex items-center gap-2.5 px-2.5 py-2 rounded-xl bg-canvas">' +
+      '<span class="w-8 h-8 rounded-full flex items-center justify-center flex-none text-white text-[13px] font-bold" style="background:linear-gradient(135deg,#7C5CFC,#3B82F6)">' + esc(email.charAt(0).toUpperCase()) + '</span>' +
+      '<button data-act="syncInfo" class="min-w-0 flex-1 text-left" title="' + esc(syncState.note || look[1]) + '">' +
+        '<span class="block text-[12px] font-semibold text-ink" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(email) + '</span>' +
+        '<span class="flex items-center gap-1.5 text-[11px] text-mute"><span class="w-1.5 h-1.5 rounded-full flex-none' + (s === 'syncing' ? ' fx-pulse' : '') + '" style="background:' + look[0] + '"></span>' + look[1] + '</span>' +
+      '</button>' +
+      '<button data-act="signOut" title="Sign out" aria-label="Sign out" class="w-7 h-7 rounded-lg flex items-center justify-center text-mute hover:text-ink hover:bg-paper flex-none">' +
+        '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5H3.5v11H6M10.5 5l3 3-3 3M13.5 8H6.5"/></svg></button>' +
+    '</div>';
+}
+
+/* ── sign in / sign up ── */
+let authMode = 'signin';
+
+function showAuth() {
+  document.getElementById('auth').classList.remove('hidden');
+  setAuthMode(authMode);
+  setTimeout(() => document.getElementById('authEmail').focus(), 50);
+}
+const hideAuth = () => document.getElementById('auth').classList.add('hidden');
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const up = mode === 'signup';
+  document.getElementById('authTitle').textContent = up ? 'Create your account' : 'Welcome back';
+  document.getElementById('authSubmit').textContent = up ? 'Create account' : 'Sign in';
+  document.getElementById('authSwitchText').textContent = up ? 'Already have an account?' : 'New here?';
+  document.getElementById('authSwitch').textContent = up ? 'Sign in' : 'Create an account';
+  document.getElementById('authPassword').autocomplete = up ? 'new-password' : 'current-password';
+  authError('');
+}
+
+function authError(msg) {
+  const el = document.getElementById('authError');
+  el.textContent = msg;
+  el.classList.toggle('hidden', !msg);
+}
+
+document.getElementById('authSwitch').addEventListener('click', () => setAuthMode(authMode === 'signup' ? 'signin' : 'signup'));
+document.getElementById('authOffline').addEventListener('click', () => { localStorage.setItem(OFFLINE_KEY, '1'); hideAuth(); renderAccount(); });
+
+document.getElementById('authForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!sb) { authError('Couldn’t reach Supabase — check your internet connection.'); return; }
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const btn = document.getElementById('authSubmit');
+  btn.disabled = true;
+  authError('');
+  try {
+    const { data, error } = authMode === 'signup'
+      ? await sb.auth.signUp({ email, password })
+      : await sb.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    if (!data.session) {
+      authError('Account created, but Supabase is waiting for you to confirm your email. In Supabase go to Authentication → Sign In / Providers → Email, turn off “Confirm email”, then sign in here.');
+      setAuthMode('signin');
+      return;
+    }
+    localStorage.removeItem(OFFLINE_KEY);
+    await onSignedIn(data.session.user, true);
+  } catch (err) {
+    const m = err.message || String(err);
+    authError(/invalid login/i.test(m) ? 'That email and password don’t match. New here? Create an account below.'
+      : /not confirmed/i.test(m) ? 'Your email isn’t confirmed yet. In Supabase turn off “Confirm email” (Authentication → Sign In / Providers → Email), or confirm from your inbox.'
+      : m);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function onSignedIn(user, fresh) {
+  sbUser = user;
+  hideAuth();
+  renderAccount();
+  try {
+    const merged = await pullAll();
+    if (fresh) showNotification(merged ? 'Signed in — your tasks are now saved to the cloud' : 'Signed in — your tasks are loaded', 'success');
+  } catch (e) {
+    setSyncState('error', describeSyncError(e));
+    showNotification(describeSyncError(e), 'error');
+  }
+}
+
+async function initCloud() {
+  renderAccount();
+  if (!window.supabase) { setSyncState('error', 'Couldn’t load the sync library — you may be offline.'); return; }
+  sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+  const { data } = await sb.auth.getSession();
+  if (data.session) await onSignedIn(data.session.user, false);
+  else if (!localStorage.getItem(OFFLINE_KEY)) showAuth();
+  // pick up changes made on another device when you come back to this tab
+  let lastPull = Date.now();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !sbUser || syncMeta().dirty || Date.now() - lastPull < 60000) return;
+    lastPull = Date.now();
+    pullAll().catch(e => setSyncState('error', describeSyncError(e)));
+  });
+  window.addEventListener('online', () => { if (sbUser) pushAll(); });
+}
+
+function signOut() {
+  showConfirmModal('Sign out?', 'Your tasks stay safe in the cloud. This device’s copy will be cleared — sign in again to get them back.', async () => {
+    try { await pushAll(); } catch (e) {}
+    await sb.auth.signOut();
+    [KEY, HISTORY_KEY, SCHED_KEY, SESSIONS_KEY, FOCUS_KEY, NOTIF_KEY, FIRED_KEY, ZONE_KEY, TIMER_KEY, SYNC_META_KEY].forEach(k => localStorage.removeItem(k));
+    location.reload();
+  });
+}
+
 runSchedules();
 // resume a deep work session after a reload (music waits for a click — browsers require it)
 if (zone && !zone.summary && !(timer && timer.id === zone.taskId)) { zone = null; saveZone(); }
@@ -3696,6 +4050,7 @@ renderTimerBar();
 renderBell();
 renderSoundControls();
 reminderTick();
+initCloud();
 </script>
 </body>
 </html>
