@@ -3700,7 +3700,9 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (!e.key) return; // Chrome autofill fires keydown events with no key
   if (zone && zoneShown) return; // the zone has its own keys
+  if (!document.getElementById('auth').classList.contains('hidden')) return; // typing on the sign-in screen
   if (P) {
     if (e.key === 'Escape') return endProcessing();
     if (P.step === 1) {
@@ -3995,6 +3997,7 @@ document.getElementById('authForm').addEventListener('submit', async (e) => {
   } catch (err) {
     const m = err.message || String(err);
     authError(/invalid login/i.test(m) ? 'That email and password don’t match. New here? Create an account below.'
+      : /signups? (are|is) disabled|provider is disabled|logins are disabled/i.test(m) ? 'Email sign-in is switched off in Supabase. Go to Authentication → Sign In / Providers → Email and turn ON “Enable Email provider” (keep “Confirm email” OFF), then try again.'
       : /not confirmed/i.test(m) ? 'Your email isn’t confirmed yet. In Supabase turn off “Confirm email” (Authentication → Sign In / Providers → Email), or confirm from your inbox.'
       : m);
   } finally {
