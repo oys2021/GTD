@@ -1889,20 +1889,14 @@ document.getElementById('timerBar').addEventListener('click', (e) => {
 setInterval(tickTimer, 1000);
 
 /* ══════════════════════════ deep work zone ══════════════════════════ */
-/* live channels are stations from the open Radio Browser directory, picked per tag;
-   brown noise and rain are generated offline. (SomaFM blocks playback from other websites, so it isn't used.) */
+/* every sound is made in the browser — the music channels are composed live (see "generated music"),
+   so nothing streams and it all works offline */
 const STATIONS = [
-  { id: 'chill',  name: 'Chillout',     vibe: 'Mellow downtempo beats', tag: 'chillout', match: /chill/i, focus: true },
-  { id: 'ambient', name: 'Ambient',     vibe: 'Atmospheric, no beats',  tag: 'ambient',  match: /ambient|chill|sleep|relax/i, focus: true },
-  { id: 'lounge', name: 'Lounge',       vibe: 'Smooth lounge grooves',  tag: 'lounge',   match: /lounge/i, focus: true },
-  { id: 'piano',  name: 'Piano',        vibe: 'Calm piano, mostly solo', tag: 'piano',   match: /piano/i, focus: true },
-  { id: 'lofi',   name: 'Lo-fi',        vibe: 'Beats to focus to',      tag: 'lofi',     match: /lo-?fi/i, focus: true },
-  { id: 'blues',  name: 'Blues',        vibe: 'Smoky guitars, slow grooves', tag: 'blues', match: /blues/i },
-  { id: 'rnb',    name: 'R&B',          vibe: 'Smooth rhythm & blues', tag: 'rnb',   match: /r\s?&\s?b|rnb|r'n'b|rhythm/i },
-  { id: 'soul',   name: 'Soul',         vibe: 'Classic & neo-soul',    tag: 'soul',  match: /soul/i },
-  { id: 'jazz',   name: 'Smooth Jazz',  vibe: 'Easy, warm, wordless',  tag: 'smooth jazz', match: /jazz/i },
-  { id: 'bossa',  name: 'Bossa Nova',   vibe: 'Bossa nova, relaxed',   tag: 'bossa nova', match: /bossa/i },
-  { id: 'classical', name: 'Classical', vibe: 'Piano, strings, calm',  tag: 'classical', match: /classical|piano|symphon|baroque|chamber/i },
+  { id: 'mix',   name: 'Focus Mix',        vibe: 'R&B, study jazz, lo-fi & deep focus, blended', style: 'mix' },
+  { id: 'rnb',   name: 'R&B Instrumental', vibe: 'Neo-soul keys, warm bass, laid-back drums',   style: 'rnb' },
+  { id: 'jazz',  name: 'Study Jazz',       vibe: 'Walking bass, brushes, piano',               style: 'jazz' },
+  { id: 'lofi',  name: 'Lo-fi Soul',       vibe: 'Dusty beats and vinyl crackle',              style: 'lofi' },
+  { id: 'deep',  name: 'Deep Focus',       vibe: 'Slow pads, soft piano, no drums',            style: 'focus' },
   { id: 'brown',  name: 'Brown noise',  vibe: 'Steady, warm rumble',   gen: 'brown' },
   { id: 'rain',   name: 'Soft rain',    vibe: 'Gentle rainfall',       gen: 'rain' },
   { id: 'none',   name: 'Silence',      vibe: 'Just you and the timer' }
@@ -1911,8 +1905,8 @@ const STATIONS = [
 const ZONE_PREF_KEY = 'gtd.zoneprefs.v1', ZONE_KEY = 'gtd.zone.v1', SESSIONS_KEY = 'gtd.sessions.v1';
 let zonePrefs, zone, sessions;
 try { zonePrefs = JSON.parse(localStorage.getItem(ZONE_PREF_KEY)) || {}; } catch (e) { zonePrefs = {}; }
-zonePrefs = Object.assign({ station: 'chill', volume: 0.5, minutes: 50 }, zonePrefs);
-if (!STATIONS.some(s => s.id === zonePrefs.station)) zonePrefs.station = 'chill'; // old SomaFM picks
+zonePrefs = Object.assign({ station: 'mix', volume: 0.5, minutes: 50 }, zonePrefs);
+if (!STATIONS.some(s => s.id === zonePrefs.station)) zonePrefs.station = 'mix'; // picks from the old radio channels
 try { zone = JSON.parse(localStorage.getItem(ZONE_KEY)); } catch (e) { zone = null; }
 try { sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY)) || []; } catch (e) { sessions = []; }
 let zoneShown = false;
@@ -1923,36 +1917,7 @@ const saveZone = () => zone ? localStorage.setItem(ZONE_KEY, JSON.stringify(zone
 const saveSessions = () => { localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions)); queueSync(); };
 
 /* ── music ── */
-const music = { station: null, playing: false, status: 'Paused', el: null, noise: null, duck: 1 };
-
-// each stream gets its own player; events from a player we've moved on from are ignored
-// (resetting an old player fires a late "error" that must not be blamed on the new station)
-function musicEl() {
-  retireMusicEl();
-  const el = new Audio();
-  el.preload = 'none';
-  const current = () => music.el === el;
-  el.addEventListener('playing', () => { if (!current()) return; music.playing = true; music.retries = 0; music.status = 'Now playing'; renderZoneMusic(); });
-  el.addEventListener('waiting', () => { if (!current()) return; music.status = 'Buffering…'; renderZoneMusic(); });
-  el.addEventListener('error', () => {
-    if (!current() || !el.error || !el.getAttribute('src')) return;
-    // a genre channel quietly moves on to the next station in that genre
-    const st = STATIONS.find(s => s.id === music.station);
-    if (st && st.tag && (music.retries || 0) < 4) { music.retries = (music.retries || 0) + 1; playGenre(st, 1); return; }
-    music.playing = false;
-    music.status = 'Couldn’t connect';
-    renderZoneMusic();
-    showNotification('Couldn’t reach that station — check your connection, or pick brown noise or rain (they work offline).', 'error');
-  });
-  music.el = el;
-  return el;
-}
-
-function retireMusicEl() {
-  const old = music.el;
-  music.el = null;
-  if (old) { old.pause(); old.removeAttribute('src'); old.load(); } // load() stops the download
-}
+const music = { station: null, playing: false, status: 'Paused', noise: null, gen: null, duck: 1, channel: null };
 
 function startNoise(kind) {
   const ctx = audio();
@@ -1992,13 +1957,332 @@ function stopNoise() {
 // volume = your slider × duck (quieter once time is up)
 function applyMusicVolume(ramp) {
   const v = zonePrefs.volume * music.duck;
-  if (music.el) music.el.volume = Math.min(1, v);
-  if (music.noise) {
-    const g = music.noise.out.gain, now = audioCtx.currentTime;
-    g.cancelScheduledValues(now);
-    g.setValueAtTime(Math.max(g.value, 0.0001), now);
-    g.linearRampToValueAtTime(Math.max(0.0001, v * (music.noise.kind === 'rain' ? 0.35 : 0.6)), now + (ramp || 0.15));
+  const node = music.noise ? music.noise.out : music.gen ? music.gen.out : null;
+  if (!node) return;
+  const level = music.noise ? v * (music.noise.kind === 'rain' ? 0.35 : 0.6) : v * 0.9;
+  const g = node.gain, now = audioCtx.currentTime;
+  g.cancelScheduledValues(now);
+  g.setValueAtTime(Math.max(g.value, 0.0001), now);
+  g.linearRampToValueAtTime(Math.max(0.0001, level), now + (ramp || 0.15));
+}
+
+/* ══ generated music ══
+   Composed and played live with Web Audio — no files, no streaming, works offline.
+   Instruments: FM electric piano, bass, drum kit, pads and vinyl crackle, driven by a
+   look-ahead scheduler. Each tune picks a style, key and chord progression and improvises
+   melodies; a new tune is composed every 32 bars, or at the next bar with ↻. */
+
+const NOTE_NAMES = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+const CHORD = {
+  maj7: [0, 4, 7, 11], maj9: [0, 4, 7, 11, 14], m7: [0, 3, 7, 10], m9: [0, 3, 7, 10, 14], m11: [0, 3, 7, 10, 14, 17],
+  '7': [0, 4, 7, 10], '9': [0, 4, 7, 10, 14], '13': [0, 4, 10, 14, 21], '7♭9': [0, 4, 7, 10, 13],
+  add9: [0, 4, 7, 14], sus2: [0, 2, 7, 14], '6/9': [0, 4, 9, 14], m6: [0, 3, 7, 9]
+};
+// progressions as [degree in semitones from the key, chord quality]
+const PROGS = {
+  soul: [
+    [[2, 'm9'], [7, '13'], [0, 'maj9'], [9, 'm9']],
+    [[0, 'maj9'], [9, 'm9'], [2, 'm9'], [7, '13']],
+    [[5, 'maj9'], [4, 'm7'], [2, 'm9'], [0, 'maj9']],
+    [[9, 'm9'], [5, 'maj9'], [0, 'maj9'], [7, '9']],
+    [[2, 'm11'], [7, '13'], [4, 'm7'], [9, '7♭9']],
+    [[5, 'maj9'], [7, '9'], [4, 'm7'], [9, 'm9']]
+  ],
+  jazz: [
+    [[2, 'm7'], [7, '7'], [0, 'maj7'], [9, '7']],
+    [[0, 'maj7'], [9, '7'], [2, 'm7'], [7, '7']],
+    [[4, 'm7'], [9, '7'], [2, 'm7'], [7, '7']],
+    [[5, 'maj7'], [10, '7'], [0, 'maj7'], [9, 'm7']],
+    [[2, 'm7'], [7, '9'], [0, '6/9'], [0, '6/9']],
+    [[0, 'maj7'], [5, '9'], [4, 'm7'], [9, '7♭9']]
+  ],
+  focus: [
+    [[0, 'add9'], [7, 'sus2'], [9, 'm9'], [5, 'maj9']],
+    [[5, 'maj9'], [0, 'add9'], [7, 'sus2'], [9, 'm7']],
+    [[9, 'm9'], [5, 'maj7'], [0, 'add9'], [7, 'sus2']],
+    [[0, 'maj9'], [4, 'm7'], [5, 'maj9'], [5, 'm6']]
+  ]
+};
+const STYLES = {
+  rnb:   { name: 'R&B Instrumental', bpm: [76, 88],  swing: 0.16, unit: 16, beatsPerChord: 4, progs: 'soul',  drums: 'rnb',  bass: 'groove', keys: 'soul', melody: 0.35, crackle: false, tone: 4600 },
+  jazz:  { name: 'Study Jazz',       bpm: [92, 112], swing: 0.32, unit: 8,  beatsPerChord: 4, progs: 'jazz',  drums: 'jazz', bass: 'walk',   keys: 'jazz', melody: 0.45, crackle: false, tone: 5200 },
+  lofi:  { name: 'Lo-fi Soul',       bpm: [70, 80],  swing: 0.22, unit: 16, beatsPerChord: 4, progs: 'soul',  drums: 'lofi', bass: 'groove', keys: 'soul', melody: 0.3,  crackle: true,  tone: 2300 },
+  focus: { name: 'Deep Focus',       bpm: [58, 66],  swing: 0,    unit: 16, beatsPerChord: 8, progs: 'focus', drums: null,   bass: 'drone',  keys: 'pad',  melody: 0.3,  crackle: false, tone: 3000 }
+};
+const MIX_ORDER = ['rnb', 'jazz', 'lofi', 'focus'];
+
+const choose = (a) => a[Math.floor(Math.random() * a.length)];
+const chance = (p) => Math.random() < p;
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+function createMusicEngine(channel) {
+  const ctx = audio();
+  if (!ctx) return null;
+
+  /* signal chain: voices → bus → tone filter → compressor → out; plus a reverb send */
+  const out = ctx.createGain();
+  out.gain.value = 0.0001;
+  const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.Q.value = 0.4;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -20; comp.ratio.value = 3; comp.attack.value = 0.01; comp.release.value = 0.25;
+  const bus = ctx.createGain();
+  const verb = ctx.createConvolver();
+  verb.buffer = (() => {
+    const len = Math.floor(ctx.sampleRate * 2.8), b = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = b.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+    return b;
+  })();
+  const send = ctx.createGain();
+  bus.connect(tone); bus.connect(send); send.connect(verb); verb.connect(tone);
+  tone.connect(comp); comp.connect(out); out.connect(ctx.destination);
+  const keysBus = ctx.createGain(); keysBus.gain.value = 0.55; keysBus.connect(bus);
+  const bassBus = ctx.createGain(); bassBus.gain.value = 0.7;  bassBus.connect(bus);
+  const drumBus = ctx.createGain(); drumBus.gain.value = 0.6;  drumBus.connect(bus);
+  const padBus  = ctx.createGain(); padBus.gain.value = 0.5;   padBus.connect(bus);
+
+  const noise = (() => {
+    const b = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return b;
+  })();
+
+  /* ── instruments ── */
+  const env = (g, t, peak, attack, hold, release) => {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + attack);
+    g.gain.setTargetAtTime(0.0001, t + attack + hold, release);
+  };
+  const panned = (dest, pan) => { const p = ctx.createStereoPanner(); p.pan.value = pan; p.connect(dest); return p; };
+
+  // FM electric piano: sine carrier, 1:1 modulator whose depth decays — the classic "Rhodes" bark
+  function ep(t, midi, dur, vel, dest, soft) {
+    const f = mtof(midi);
+    const car = ctx.createOscillator(); car.frequency.value = f;
+    const mod = ctx.createOscillator(); mod.frequency.value = f;
+    const depth = ctx.createGain();
+    depth.gain.setValueAtTime(f * (soft ? 0.35 : 1.1) * vel, t);
+    depth.gain.exponentialRampToValueAtTime(f * 0.08 + 1, t + 0.6);
+    mod.connect(depth); depth.connect(car.frequency);
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, t);
+    amp.gain.exponentialRampToValueAtTime(0.16 * vel, t + (soft ? 0.03 : 0.006));
+    amp.gain.exponentialRampToValueAtTime(0.06 * vel, t + 0.5);
+    amp.gain.setTargetAtTime(0.0001, t + dur, soft ? 0.6 : 0.22);
+    car.connect(amp); amp.connect(panned(dest, (Math.random() - 0.5) * 0.5));
+    const end = t + dur + (soft ? 3.5 : 1.4);
+    car.start(t); mod.start(t); car.stop(end); mod.stop(end);
   }
+
+  function bassNote(t, midi, dur, vel) {
+    const f = mtof(midi);
+    const a = ctx.createOscillator(); a.type = 'triangle'; a.frequency.value = f;
+    const b = ctx.createOscillator(); b.type = 'sine'; b.frequency.value = f;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1100, t); lp.frequency.exponentialRampToValueAtTime(320, t + 0.3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.55 * vel, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.3 * vel, t + 0.25);
+    g.gain.setTargetAtTime(0.0001, t + dur * 0.92, 0.05);
+    a.connect(lp); b.connect(lp); lp.connect(g); g.connect(bassBus);
+    a.start(t); b.start(t); a.stop(t + dur + 0.5); b.stop(t + dur + 0.5);
+  }
+
+  function noiseHit(t, type, freq, q, peak, decay, attack) {
+    const s = ctx.createBufferSource(); s.buffer = noise;
+    const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = ctx.createGain(); env(g, t, peak, attack || 0.002, 0, decay);
+    s.connect(f); f.connect(g); g.connect(drumBus);
+    s.start(t, Math.random() * 0.5); s.stop(t + decay * 6 + 0.05);
+  }
+  function kick(t, vel) {
+    const o = ctx.createOscillator();
+    o.frequency.setValueAtTime(125, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.13);
+    const g = ctx.createGain(); env(g, t, 0.95 * vel, 0.004, 0.02, 0.11);
+    o.connect(g); g.connect(drumBus); o.start(t); o.stop(t + 0.7);
+  }
+  function snare(t, vel) {
+    noiseHit(t, 'bandpass', 1900, 0.7, 0.42 * vel, 0.07);
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(200, t); o.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+    const g = ctx.createGain(); env(g, t, 0.18 * vel, 0.002, 0, 0.04);
+    o.connect(g); g.connect(drumBus); o.start(t); o.stop(t + 0.3);
+  }
+  const hat = (t, vel, open) => noiseHit(t, 'highpass', 7500, 0.6, 0.16 * vel, open ? 0.09 : 0.018);
+  const rim = (t, vel) => noiseHit(t, 'bandpass', 3200, 2, 0.2 * vel, 0.012);
+  const ride = (t, vel) => noiseHit(t, 'bandpass', 7800, 1.2, 0.09 * vel, 0.22);
+  const brush = (t, vel) => noiseHit(t, 'bandpass', 2800, 0.5, 0.11 * vel, 0.09, 0.025);
+
+  function pad(t, notes, dur) {
+    notes.forEach((m, n) => {
+      [-7, 7].forEach(cents => {
+        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = cents;
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700 + n * 120; lp.Q.value = 0.3;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.018, t + 2.2);
+        g.gain.setValueAtTime(0.018, t + dur);
+        g.gain.linearRampToValueAtTime(0.0001, t + dur + 2.8);
+        o.connect(lp); lp.connect(g); g.connect(padBus);
+        o.start(t); o.stop(t + dur + 3);
+      });
+    });
+  }
+
+  // vinyl crackle: sparse clicks over faint hiss, looped
+  let crackleSrc = null;
+  function startCrackle() {
+    const len = ctx.sampleRate * 4, b = ctx.createBuffer(1, len, ctx.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * 0.012 + (Math.random() < 0.0004 ? (Math.random() * 2 - 1) * 0.7 : 0);
+    crackleSrc = ctx.createBufferSource(); crackleSrc.buffer = b; crackleSrc.loop = true;
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1500;
+    const g = ctx.createGain(); g.gain.value = 0.35;
+    crackleSrc.connect(hp); hp.connect(g); g.connect(out);
+    crackleSrc.start();
+  }
+  function stopCrackle() { if (crackleSrc) { try { crackleSrc.stop(); } catch (e) {} crackleSrc = null; } }
+
+  /* ── composition ── */
+  let style, S, tune, bar = 0, step = 0, nextTime = ctx.currentTime + 0.08;
+  let mixIndex = Math.floor(Math.random() * MIX_ORDER.length) - 1;
+  let barsInTune = 0, pendingNew = false, melodyPlan = [];
+
+  function voicing(root, quality, low, high) {
+    const notes = CHORD[quality].filter(i => i !== 0).map(i => root + i);
+    return notes.map(n => { while (n < low) n += 12; while (n > high) n -= 12; return n; }).sort((a, b) => a - b);
+  }
+  const chordName = ([deg, q]) => NOTE_NAMES[(tune.key + deg) % 12] + q;
+
+  function newTune() {
+    style = channel === 'mix' ? MIX_ORDER[(mixIndex = (mixIndex + 1) % MIX_ORDER.length)] : channel;
+    S = STYLES[style];
+    const prog = choose(PROGS[S.progs]);
+    tune = {
+      key: choose([0, 2, 3, 5, 7, 8, 10]),
+      prog,
+      bpm: S.bpm[0] + Math.floor(Math.random() * (S.bpm[1] - S.bpm[0])),
+      kickPat: choose([[0, 10], [0, 7, 10], [0, 3, 10], [0, 10, 14]]),
+      keysPat: choose([[0, 6, 10], [0, 7], [0, 3, 10], [0, 10]])
+    };
+    tone.frequency.setTargetAtTime(S.tone, ctx.currentTime, 0.5);
+    send.gain.setTargetAtTime(style === 'focus' ? 0.5 : style === 'jazz' ? 0.22 : 0.28, ctx.currentTime, 0.5);
+    stopCrackle();
+    if (S.crackle) startCrackle();
+    barsInTune = 0;
+    music.channel = (channel === 'mix' ? S.name + ' · ' : '') + prog.map(chordName).join(' – ') + ' · ' + tune.bpm + ' BPM';
+    renderZoneMusic();
+  }
+
+  const sixteenth = () => 60 / tune.bpm / 4;
+  function chordAt(barIndex, beat) {
+    return tune.prog[Math.floor((barIndex * 4 + beat) / S.beatsPerChord) % tune.prog.length];
+  }
+  const isChordStart = (barIndex, s) => s === 0 && (barIndex * 4) % S.beatsPerChord === 0;
+
+  // a short improvised phrase over the current chord, using chord tones plus the 9th and 6th
+  function planMelody(chord) {
+    melodyPlan = [];
+    if (!chance(S.melody)) return;
+    const root = tune.key + chord[0];
+    const scale = CHORD[chord[1]].concat([2, 9]).map(i => (root + i) % 12);
+    let pitch = 72 + ((root + choose([3, 4, 7])) % 12);
+    const count = 3 + Math.floor(Math.random() * 4);
+    const slots = [...new Set(Array.from({ length: count }, () => 1 + Math.floor(Math.random() * 14)))].sort((a, b) => a - b);
+    slots.forEach(s => {
+      const options = [];
+      for (let m = pitch - 5; m <= pitch + 5; m++) if (scale.includes(((m % 12) + 12) % 12) && m >= 67 && m <= 86) options.push(m);
+      if (options.length) pitch = choose(options);
+      melodyPlan.push({ s, m: pitch, len: choose([1, 2, 2, 3, 4]) });
+    });
+  }
+
+  function scheduleStep(s, t) {
+    const offbeat = (S.unit === 16 && s % 2 === 1) || (S.unit === 8 && s % 4 === 2);
+    if (S.swing && offbeat) t += S.swing * sixteenth() * (S.unit === 8 ? 2 : 1);
+    const beat = Math.floor(s / 4);
+    const chord = chordAt(bar, beat);
+    const root = tune.key + chord[0];
+    const chordLen = S.beatsPerChord * 4 * sixteenth();
+    const human = () => (Math.random() - 0.5) * 0.012;
+
+    if (s === 0) planMelody(chord);
+
+    /* drums */
+    if (S.drums === 'rnb' || S.drums === 'lofi') {
+      const soft = S.drums === 'lofi' ? 0.75 : 1;
+      if (tune.kickPat.includes(s)) kick(t, (s === 0 ? 1 : 0.8) * soft);
+      if (s === 4 || s === 12) snare(t + 0.018, 0.9 * soft); // laid back, just behind the beat
+      if (s % 2 === 0) hat(t + human(), (s % 4 === 0 ? 0.8 : 0.5) * soft, s === 14 && chance(0.3));
+      else if (chance(0.15)) hat(t, 0.3 * soft);
+      if ((s === 7 || s === 15) && chance(0.25)) rim(t, 0.5);
+    } else if (S.drums === 'jazz') {
+      if (s % 4 === 0 || s === 6 || s === 14) ride(t + human(), s % 4 === 0 ? 0.9 : 0.6);
+      if (s === 4 || s === 12) { brush(t, 0.8); hat(t, 0.35); }
+      if (s % 4 === 0) kick(t, 0.13);
+      if (chance(0.06)) brush(t, 0.35);
+    }
+
+    /* bass */
+    const base = 36 + (root % 12);
+    if (S.bass === 'groove') {
+      if (s === 0) bassNote(t, base, sixteenth() * 6, 1);
+      else if (s === 10 && chance(0.7)) bassNote(t, base + choose([0, 7, 12]), sixteenth() * 3, 0.75);
+      else if (s === 14 && chance(0.35)) bassNote(t, base + choose([-1, 2, 10]), sixteenth() * 2, 0.6);
+    } else if (S.bass === 'walk' && s % 4 === 0) {
+      let m;
+      if (beat === 0) m = base;
+      else if (beat === 3) m = 36 + ((tune.key + chordAt(bar + 1, 0)[0]) % 12) + choose([-1, 1, 2]); // lead into the next chord
+      else m = base + choose(CHORD[chord[1]].filter(i => i > 0 && i < 12));
+      bassNote(t, m, sixteenth() * 3.6, 0.85);
+    } else if (S.bass === 'drone' && isChordStart(bar, s)) {
+      bassNote(t, base, chordLen * 0.95, 0.55);
+    }
+
+    /* keys */
+    if (S.keys === 'soul' && tune.keysPat.includes(s)) {
+      const vel = s === 0 ? 0.85 : 0.6;
+      voicing(root, chord[1], 55, 79).forEach((m, n) => ep(t + n * 0.011 + human(), m, sixteenth() * (s === 0 ? 5 : 3), vel, keysBus));
+    } else if (S.keys === 'jazz' && (s === 0 || s === 6 || (s === 10 && chance(0.4)))) {
+      voicing(root, chord[1], 52, 74).slice(0, 3).forEach((m, n) => ep(t + n * 0.008 + human(), m, sixteenth() * (s === 0 ? 2 : 1.5), 0.6, keysBus));
+    } else if (S.keys === 'pad' && isChordStart(bar, s)) {
+      pad(t, voicing(root, chord[1], 52, 76), chordLen);
+    }
+
+    /* melody */
+    const focus = style === 'focus';
+    melodyPlan.filter(n => n.s === s).forEach(n => ep(t + human(), n.m, sixteenth() * n.len * (focus ? 2 : 1), focus ? 0.45 : 0.55, keysBus, focus));
+  }
+
+  function tick() {
+    const ahead = document.hidden ? 1.5 : 0.2; // background tabs run timers less often, so plan further ahead
+    while (nextTime < ctx.currentTime + ahead) {
+      scheduleStep(step, nextTime);
+      nextTime += sixteenth();
+      if (++step === 16) {
+        step = 0;
+        bar++;
+        barsInTune++;
+        if (pendingNew || barsInTune >= (S.beatsPerChord === 8 ? 16 : 32)) { pendingNew = false; newTune(); }
+      }
+    }
+  }
+
+  newTune();
+  const timer = setInterval(tick, 40);
+  tick();
+
+  return {
+    out,
+    newTune() { pendingNew = true; }, // takes effect at the next bar line
+    stop() {
+      clearInterval(timer);
+      stopCrackle();
+      const now = ctx.currentTime;
+      out.gain.cancelScheduledValues(now);
+      out.gain.setValueAtTime(Math.max(out.gain.value, 0.0001), now);
+      out.gain.linearRampToValueAtTime(0.0001, now + 0.4);
+      setTimeout(() => out.disconnect(), 600);
+    }
+  };
 }
 
 function startMusic(id) {
@@ -2012,11 +2296,11 @@ function startMusic(id) {
     startNoise(st.gen);
     music.playing = !!music.noise;
     music.status = 'Offline sound';
-  } else if (st.url) {
-    playStream(st.url, st.name, 'SomaFM');
-  } else if (st.tag) {
-    music.status = 'Finding a station…';
-    playGenre(st, 0);
+  } else if (st.style) {
+    music.gen = createMusicEngine(st.style);
+    music.playing = !!music.gen;
+    music.status = music.gen ? 'Now playing' : 'Audio isn’t available';
+    applyMusicVolume(1.2);
   } else {
     music.playing = false;
     music.status = 'Silence';
@@ -2024,112 +2308,10 @@ function startMusic(id) {
   renderZoneMusic();
 }
 
-function playStream(url, title, source) {
-  const el = musicEl();
-  el.src = url;
-  applyMusicVolume();
-  music.status = 'Connecting…';
-  el.play().catch(err => {
-    // AbortError just means we switched again before this one started
-    if (music.el !== el || (err && err.name === 'AbortError')) return;
-    music.playing = false;
-    music.status = 'Press play to start';
-    renderZoneMusic();
-  });
-  try {
-    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title, artist: 'Deep Work Zone · ' + source });
-  } catch (e) {}
-}
-
-/* genre stations: fetched once per genre, filtered to ones whose name matches the genre */
-const genreCache = {}, genrePos = {};
-
-async function genreStations(st) {
-  if (genreCache[st.tag]) return genreCache[st.tag];
-  // search by tag and by station name, so channels whose stations are rarely tagged well still fill up
-  const search = (by) => fetch('https://all.api.radio-browser.info/json/stations/search?' +
-    new URLSearchParams(Object.assign({ hidebroken: 'true', order: 'clickcount', reverse: 'true', limit: '60' }, by))).then(r => r.json());
-  const [byTag, byName] = await Promise.all([search({ tag: st.tag }), search({ name: st.tag })]);
-  const seen = new Set();
-  const all = byTag.concat(byName)
-    .filter(s => s.url_resolved && /mp3|aac/i.test(s.codec) && !/^\s*#/.test(s.name) && s.name.length < 70)
-    .filter(s => !seen.has(s.url_resolved) && seen.add(s.url_resolved))
-    .map(s => ({ name: s.name.trim(), url: s.url_resolved }));
-  // prefer secure streams: https sites block or downgrade plain-http audio, and they're better kept up
-  const secure = all.filter(s => s.url.startsWith('https:'));
-  const pool = secure.length >= 3 ? secure : all;
-  // a few stations that really are this genre beat many that only carry the tag
-  const named = pool.filter(s => st.match.test(s.name));
-  return (genreCache[st.tag] = named.length ? named : pool);
-}
-
-// try several stations at once (muted) and resolve with whichever can play first, or null
-function firstPlayable(cands, ms) {
-  return new Promise(resolve => {
-    let done = false;
-    const probes = [];
-    const finish = (c) => {
-      if (done) return;
-      done = true;
-      probes.forEach(a => { a.removeAttribute('src'); a.load(); });
-      resolve(c);
-    };
-    cands.forEach(c => {
-      const a = new Audio();
-      a.muted = true;
-      a.preload = 'auto';
-      a.oncanplay = () => finish(c);
-      a.onerror = () => { if (probes.every(p => p.error)) finish(null); };
-      a.src = c.url;
-      probes.push(a);
-    });
-    probes.forEach(a => a.load());
-    setTimeout(() => finish(null), ms);
-  });
-}
-
-async function playGenre(st, step) {
-  const token = music.token = (music.token || 0) + 1; // ignore results that arrive after a station change
-  const stale = () => token !== music.token || music.station !== st.id;
-  try {
-    const list = await genreStations(st);
-    if (stale()) return;
-    if (!list.length) throw new Error('empty');
-    music.status = 'Finding a station…';
-    renderZoneMusic();
-    // step 0 = the station you were on (▶ resumes it); step 1 = the next one (↻, or after a failure)
-    let from = genrePos[st.id] === undefined ? 0 : (genrePos[st.id] + step + list.length) % list.length;
-    const resuming = step === 0 && genrePos[st.id] !== undefined;
-    for (let round = 0; round < 3; round++) {
-      // resuming tries your own station on its own first; otherwise race four and take the quickest
-      const solo = resuming && round === 0;
-      const cands = solo ? [list[from]] : [...new Set([0, 1, 2, 3].map(k => list[(from + k) % list.length]))];
-      const pick = await firstPlayable(cands, 8000);
-      if (stale()) return;
-      if (pick) {
-        genrePos[st.id] = list.indexOf(pick);
-        music.channel = pick.name;
-        playStream(pick.url, st.name + ' · ' + pick.name, 'Radio Browser');
-        renderZoneMusic();
-        return;
-      }
-      from = (from + cands.length) % list.length;
-    }
-    throw new Error('none playable');
-  } catch (e) {
-    if (stale()) return;
-    music.playing = false;
-    music.status = 'No station available';
-    showNotification('Couldn’t find a working ' + st.name + ' station right now — try another channel, or brown noise / rain.', 'error');
-  }
-  renderZoneMusic();
-}
-
 function stopMusic() {
-  music.token = (music.token || 0) + 1;
   music.channel = null;
   stopNoise();
-  retireMusicEl();
+  if (music.gen) { music.gen.stop(); music.gen = null; }
   music.playing = false;
   music.status = 'Paused';
 }
@@ -2231,15 +2413,15 @@ function zoneMusicHtml() {
   return '<div class="flex items-center gap-4">' +
     '<div class="eq' + (music.playing ? '' : ' paused') + ' w-12 h-12 rounded-xl bg-white/10 flex items-end justify-center gap-[3px] pb-3.5 text-white flex-none"><span></span><span></span><span></span><span></span></div>' +
     '<div class="flex-1 min-w-0">' +
-      '<div class="text-[11px] text-white/45 font-medium">' + music.status + (st.url || st.tag ? ' · live radio' : '') + '</div>' +
+      '<div class="text-[11px] text-white/45 font-medium">' + music.status + (st.style ? ' · made live, offline' : '') + '</div>' +
       '<div class="text-[15px] font-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + st.name + '</div>' +
-      '<div class="text-[12px] text-white/50" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (st.tag && music.channel ? esc(music.channel) : st.vibe) + '</div>' +
+      '<div class="text-[12px] text-white/50" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (st.style && music.channel ? esc(music.channel) : st.vibe) + '</div>' +
     '</div>' +
     '<div class="flex items-center gap-1 flex-none">' +
       '<button data-zone="prev" aria-label="Previous station" class="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10">' + icon('<path d="M4 3h1.5v10H4zM13 3v10L6.5 8z"/>') + '</button>' +
       '<button data-zone="music" aria-label="' + (music.playing ? 'Pause music' : 'Play music') + '" class="w-10 h-10 rounded-full bg-white text-ink flex items-center justify-center hover:bg-white/90">' +
         (music.playing ? icon('<path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z"/>', 16) : icon('<path d="M5 3v10l8-5z"/>', 16)) + '</button>' +
-      (st.tag ? '<button data-zone="another" aria-label="Another ' + st.name + ' station" title="Another ' + st.name + ' station" class="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10">' +
+      (st.style ? '<button data-zone="another" aria-label="New tune" title="New tune" class="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10">' +
         '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 11-1.6-3.9M13.5 2v3h-3"/></svg></button>' : '') +
       '<button data-zone="next" aria-label="Next station" class="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10">' + icon('<path d="M10.5 3H12v10h-1.5zM3 3v10l6.5-5z"/>') + '</button>' +
     '</div>' +
@@ -2377,7 +2559,9 @@ document.getElementById('zone').addEventListener('click', (e) => {
   if (k === 'next') cycleStation(1);
   if (k === 'another') {
     const st = STATIONS.find(s => s.id === music.station);
-    if (st && st.tag) { stopMusic(); music.station = st.id; music.status = 'Finding a station…'; renderZoneMusic(); playGenre(st, 1); }
+    if (st && st.style) {
+      if (music.gen) { music.gen.newTune(); play('tick'); } else startMusic(st.id);
+    }
   }
 });
 
@@ -2464,21 +2648,21 @@ V.deepwork = () => {
 
   const sound = panel(
     '<div class="px-2 pt-1 pb-1 text-[13px] font-medium text-mute">Focus sound</div>' +
-    [['Focus radio', s => s.focus], ['Genres', s => s.tag && !s.focus], ['Offline & quiet', s => !s.tag]].map(([group, test]) =>
+    [['Focus music', s => s.style], ['Sounds & quiet', s => !s.style]].map(([group, test]) =>
       '<div class="px-2 pt-3 pb-2 text-[11px] font-semibold text-faint uppercase tracking-[.08em]">' + group + '</div>' +
       '<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">' + STATIONS.filter(test).map(s => {
         const on = s.id === zonePrefs.station;
         return '<button data-act="zoneStation" data-st="' + s.id + '" class="text-left rounded-xl border p-3 transition-colors ' + (on ? 'bg-brand-soft border-brand shadow-[0_4px_14px_rgba(108,92,231,0.12)]' : 'bg-paper border-line hover:border-rule') + '">' +
           '<div class="flex items-center justify-between gap-2">' +
             '<span class="eq' + (on && music.playing ? '' : ' paused') + ' h-4 flex items-end gap-[2px] ' + (on ? 'text-brand' : 'text-faint') + '"><span></span><span></span><span></span><span></span></span>' +
-            '<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-canvas ' + (s.url || s.tag ? 'text-mute' : 'text-faint') + '">' + (s.focus ? 'LIVE' : s.tag ? 'GENRE' : s.gen ? 'OFFLINE' : 'QUIET') + '</span>' +
+            '<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-canvas ' + (s.style ? 'text-mute' : 'text-faint') + '">' + (s.style ? 'MUSIC' : s.gen ? 'NOISE' : 'QUIET') + '</span>' +
           '</div>' +
           '<div class="mt-2.5 text-[13px] font-semibold">' + s.name + '</div>' +
           '<div class="mt-0.5 text-[11px] text-mute leading-snug">' + s.vibe + '</div>' +
         '</button>';
       }).join('') + '</div>').join('') +
-    '<div class="px-2 pt-3 text-[11px] text-faint leading-relaxed">Live channels play stations from the open <a href="https://www.radio-browser.info" target="_blank" rel="noopener" class="underline hover:text-ink">Radio Browser</a> directory — use ↻ in the zone to hop to another station. ' +
-      'Brown noise and rain work without internet.</div>'
+    '<div class="px-2 pt-3 text-[11px] text-faint leading-relaxed">All music is composed live in your browser — nothing streams, so it never buffers and works offline. ' +
+      'A new tune starts every few minutes; press ↻ in the zone for one straight away.</div>'
   );
 
   const recent = panel(
