@@ -1928,14 +1928,17 @@ const saveSessions = () => { localStorage.setItem(SESSIONS_KEY, JSON.stringify(s
 /* ── music ── */
 const music = { station: null, playing: false, status: 'Paused', el: null, noise: null, duck: 1 };
 
+// each stream gets its own player; events from a player we've moved on from are ignored
+// (resetting an old player fires a late "error" that must not be blamed on the new station)
 function musicEl() {
-  if (music.el) return music.el;
+  retireMusicEl();
   const el = new Audio();
   el.preload = 'none';
-  el.addEventListener('playing', () => { music.playing = true; music.retries = 0; music.status = 'Now playing'; renderZoneMusic(); });
-  el.addEventListener('waiting', () => { music.status = 'Buffering…'; renderZoneMusic(); });
+  const current = () => music.el === el;
+  el.addEventListener('playing', () => { if (!current()) return; music.playing = true; music.retries = 0; music.status = 'Now playing'; renderZoneMusic(); });
+  el.addEventListener('waiting', () => { if (!current()) return; music.status = 'Buffering…'; renderZoneMusic(); });
   el.addEventListener('error', () => {
-    if (!el.getAttribute('src')) return;
+    if (!current() || !el.error || !el.getAttribute('src')) return;
     // a genre channel quietly moves on to the next station in that genre
     const st = STATIONS.find(s => s.id === music.station);
     if (st && st.tag && (music.retries || 0) < 4) { music.retries = (music.retries || 0) + 1; playGenre(st, 1); return; }
@@ -1946,6 +1949,12 @@ function musicEl() {
   });
   music.el = el;
   return el;
+}
+
+function retireMusicEl() {
+  const old = music.el;
+  music.el = null;
+  if (old) { old.pause(); old.removeAttribute('src'); old.load(); } // load() stops the download
 }
 
 function startNoise(kind) {
@@ -2022,7 +2031,13 @@ function playStream(url, title, source) {
   el.src = url;
   applyMusicVolume();
   music.status = 'Connecting…';
-  el.play().catch(() => { music.playing = false; music.status = 'Press play to start'; renderZoneMusic(); });
+  el.play().catch(err => {
+    // AbortError just means we switched again before this one started
+    if (music.el !== el || (err && err.name === 'AbortError')) return;
+    music.playing = false;
+    music.status = 'Press play to start';
+    renderZoneMusic();
+  });
   try {
     if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title, artist: 'Deep Work Zone · ' + source });
   } catch (e) {}
@@ -2067,7 +2082,7 @@ function stopMusic() {
   music.token = (music.token || 0) + 1;
   music.channel = null;
   stopNoise();
-  if (music.el) { music.el.pause(); music.el.removeAttribute('src'); music.el.load(); }
+  retireMusicEl();
   music.playing = false;
   music.status = 'Paused';
 }
