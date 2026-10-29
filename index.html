@@ -1889,23 +1889,19 @@ document.getElementById('timerBar').addEventListener('click', (e) => {
 setInterval(tickTimer, 1000);
 
 /* ══════════════════════════ deep work zone ══════════════════════════ */
-/* streams are SomaFM (listener-supported internet radio); brown noise and rain are generated offline */
+/* live channels are stations from the open Radio Browser directory, picked per tag;
+   brown noise and rain are generated offline. (SomaFM blocks playback from other websites, so it isn't used.) */
 const STATIONS = [
-  { id: 'groove', name: 'Groove Salad', vibe: 'Chilled ambient beats', url: 'https://ice1.somafm.com/groovesalad-128-mp3' },
-  { id: 'fluid',  name: 'Fluid',        vibe: 'Instrumental hip-hop',  url: 'https://ice1.somafm.com/fluid-128-mp3' },
-  { id: 'drone',  name: 'Drone Zone',   vibe: 'Atmospheric, no beats', url: 'https://ice1.somafm.com/dronezone-128-mp3' },
-  { id: 'space',  name: 'Deep Space One', vibe: 'Deep ambient space',  url: 'https://ice1.somafm.com/deepspaceone-128-mp3' },
-  { id: 'lush',   name: 'Lush',         vibe: 'Mellow vocals, soft electronica', url: 'https://ice1.somafm.com/lush-128-mp3' },
-  { id: 'sonic',  name: 'Sonic Universe', vibe: 'Modern jazz, transcendent', url: 'https://ice1.somafm.com/sonicuniverse-128-mp3' },
-  { id: 'bossa',  name: 'Bossa Beyond', vibe: 'Bossa nova, relaxed',   url: 'https://ice1.somafm.com/bossa-128-mp3' },
-  { id: 'agent',  name: 'Secret Agent', vibe: 'Smooth lounge grooves',  url: 'https://ice1.somafm.com/secretagent-128-mp3' },
-  { id: 'synph',  name: 'Synphaera',    vibe: 'Cinematic ambient',     url: 'https://ice1.somafm.com/synphaera-128-mp3' },
-  /* genre channels: live stations looked up in the open Radio Browser directory */
+  { id: 'chill',  name: 'Chillout',     vibe: 'Mellow downtempo beats', tag: 'chillout', match: /chill/i, focus: true },
+  { id: 'ambient', name: 'Ambient',     vibe: 'Atmospheric, no beats',  tag: 'ambient',  match: /ambient|chill|sleep|relax/i, focus: true },
+  { id: 'lounge', name: 'Lounge',       vibe: 'Smooth lounge grooves',  tag: 'lounge',   match: /lounge/i, focus: true },
+  { id: 'piano',  name: 'Piano',        vibe: 'Calm piano, mostly solo', tag: 'piano',   match: /piano/i, focus: true },
+  { id: 'lofi',   name: 'Lo-fi',        vibe: 'Beats to focus to',      tag: 'lofi',     match: /lo-?fi/i, focus: true },
   { id: 'blues',  name: 'Blues',        vibe: 'Smoky guitars, slow grooves', tag: 'blues', match: /blues/i },
   { id: 'rnb',    name: 'R&B',          vibe: 'Smooth rhythm & blues', tag: 'rnb',   match: /r\s?&\s?b|rnb|r'n'b|rhythm/i },
   { id: 'soul',   name: 'Soul',         vibe: 'Classic & neo-soul',    tag: 'soul',  match: /soul/i },
   { id: 'jazz',   name: 'Smooth Jazz',  vibe: 'Easy, warm, wordless',  tag: 'smooth jazz', match: /jazz/i },
-  { id: 'lofi',   name: 'Lo-fi',        vibe: 'Beats to focus to',     tag: 'lofi',  match: /lo-?fi/i },
+  { id: 'bossa',  name: 'Bossa Nova',   vibe: 'Bossa nova, relaxed',   tag: 'bossa nova', match: /bossa/i },
   { id: 'classical', name: 'Classical', vibe: 'Piano, strings, calm',  tag: 'classical', match: /classical|piano|symphon|baroque|chamber/i },
   { id: 'brown',  name: 'Brown noise',  vibe: 'Steady, warm rumble',   gen: 'brown' },
   { id: 'rain',   name: 'Soft rain',    vibe: 'Gentle rainfall',       gen: 'rain' },
@@ -1915,7 +1911,8 @@ const STATIONS = [
 const ZONE_PREF_KEY = 'gtd.zoneprefs.v1', ZONE_KEY = 'gtd.zone.v1', SESSIONS_KEY = 'gtd.sessions.v1';
 let zonePrefs, zone, sessions;
 try { zonePrefs = JSON.parse(localStorage.getItem(ZONE_PREF_KEY)) || {}; } catch (e) { zonePrefs = {}; }
-zonePrefs = Object.assign({ station: 'groove', volume: 0.5, minutes: 50 }, zonePrefs);
+zonePrefs = Object.assign({ station: 'chill', volume: 0.5, minutes: 50 }, zonePrefs);
+if (!STATIONS.some(s => s.id === zonePrefs.station)) zonePrefs.station = 'chill'; // old SomaFM picks
 try { zone = JSON.parse(localStorage.getItem(ZONE_KEY)); } catch (e) { zone = null; }
 try { sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY)) || []; } catch (e) { sessions = []; }
 let zoneShown = false;
@@ -2009,6 +2006,7 @@ function startMusic(id) {
   stopMusic();
   music.station = st.id;
   zonePrefs.station = st.id;
+  if (zonePrefs.volume < 0.05) zonePrefs.volume = 0.5; // pressing play at zero volume would sound like nothing works
   saveZonePrefs();
   if (st.gen) {
     startNoise(st.gen);
@@ -2018,7 +2016,7 @@ function startMusic(id) {
     playStream(st.url, st.name, 'SomaFM');
   } else if (st.tag) {
     music.status = 'Finding a station…';
-    playGenre(st, 1);
+    playGenre(st, 0);
   } else {
     music.playing = false;
     music.status = 'Silence';
@@ -2048,32 +2046,81 @@ const genreCache = {}, genrePos = {};
 
 async function genreStations(st) {
   if (genreCache[st.tag]) return genreCache[st.tag];
-  const res = await fetch('https://all.api.radio-browser.info/json/stations/search?' +
-    new URLSearchParams({ tag: st.tag, hidebroken: 'true', order: 'clickcount', reverse: 'true', limit: '60' }));
+  // search by tag and by station name, so channels whose stations are rarely tagged well still fill up
+  const search = (by) => fetch('https://all.api.radio-browser.info/json/stations/search?' +
+    new URLSearchParams(Object.assign({ hidebroken: 'true', order: 'clickcount', reverse: 'true', limit: '60' }, by))).then(r => r.json());
+  const [byTag, byName] = await Promise.all([search({ tag: st.tag }), search({ name: st.tag })]);
   const seen = new Set();
-  const all = (await res.json())
+  const all = byTag.concat(byName)
     .filter(s => s.url_resolved && /mp3|aac/i.test(s.codec) && !/^\s*#/.test(s.name) && s.name.length < 70)
     .filter(s => !seen.has(s.url_resolved) && seen.add(s.url_resolved))
     .map(s => ({ name: s.name.trim(), url: s.url_resolved }));
-  const named = all.filter(s => st.match.test(s.name));
-  return (genreCache[st.tag] = named.length >= 3 ? named : all);
+  // prefer secure streams: https sites block or downgrade plain-http audio, and they're better kept up
+  const secure = all.filter(s => s.url.startsWith('https:'));
+  const pool = secure.length >= 3 ? secure : all;
+  // a few stations that really are this genre beat many that only carry the tag
+  const named = pool.filter(s => st.match.test(s.name));
+  return (genreCache[st.tag] = named.length ? named : pool);
+}
+
+// try several stations at once (muted) and resolve with whichever can play first, or null
+function firstPlayable(cands, ms) {
+  return new Promise(resolve => {
+    let done = false;
+    const probes = [];
+    const finish = (c) => {
+      if (done) return;
+      done = true;
+      probes.forEach(a => { a.removeAttribute('src'); a.load(); });
+      resolve(c);
+    };
+    cands.forEach(c => {
+      const a = new Audio();
+      a.muted = true;
+      a.preload = 'auto';
+      a.oncanplay = () => finish(c);
+      a.onerror = () => { if (probes.every(p => p.error)) finish(null); };
+      a.src = c.url;
+      probes.push(a);
+    });
+    probes.forEach(a => a.load());
+    setTimeout(() => finish(null), ms);
+  });
 }
 
 async function playGenre(st, step) {
   const token = music.token = (music.token || 0) + 1; // ignore results that arrive after a station change
+  const stale = () => token !== music.token || music.station !== st.id;
   try {
     const list = await genreStations(st);
-    if (token !== music.token || music.station !== st.id) return;
+    if (stale()) return;
     if (!list.length) throw new Error('empty');
-    genrePos[st.id] = ((genrePos[st.id] ?? -1) + step + list.length) % list.length;
-    const pick = list[genrePos[st.id]];
-    music.channel = pick.name;
-    playStream(pick.url, st.name + ' · ' + pick.name, 'Radio Browser');
+    music.status = 'Finding a station…';
+    renderZoneMusic();
+    // step 0 = the station you were on (▶ resumes it); step 1 = the next one (↻, or after a failure)
+    let from = genrePos[st.id] === undefined ? 0 : (genrePos[st.id] + step + list.length) % list.length;
+    const resuming = step === 0 && genrePos[st.id] !== undefined;
+    for (let round = 0; round < 3; round++) {
+      // resuming tries your own station on its own first; otherwise race four and take the quickest
+      const solo = resuming && round === 0;
+      const cands = solo ? [list[from]] : [...new Set([0, 1, 2, 3].map(k => list[(from + k) % list.length]))];
+      const pick = await firstPlayable(cands, 8000);
+      if (stale()) return;
+      if (pick) {
+        genrePos[st.id] = list.indexOf(pick);
+        music.channel = pick.name;
+        playStream(pick.url, st.name + ' · ' + pick.name, 'Radio Browser');
+        renderZoneMusic();
+        return;
+      }
+      from = (from + cands.length) % list.length;
+    }
+    throw new Error('none playable');
   } catch (e) {
-    if (token !== music.token) return;
+    if (stale()) return;
     music.playing = false;
-    music.status = 'Couldn’t load stations';
-    showNotification('Couldn’t load ' + st.name + ' stations — check your connection.', 'error');
+    music.status = 'No station available';
+    showNotification('Couldn’t find a working ' + st.name + ' station right now — try another channel, or brown noise / rain.', 'error');
   }
   renderZoneMusic();
 }
@@ -2417,21 +2464,21 @@ V.deepwork = () => {
 
   const sound = panel(
     '<div class="px-2 pt-1 pb-1 text-[13px] font-medium text-mute">Focus sound</div>' +
-    [['Focus radio', s => s.url], ['Genres', s => s.tag], ['Offline & quiet', s => !s.url && !s.tag]].map(([group, test]) =>
+    [['Focus radio', s => s.focus], ['Genres', s => s.tag && !s.focus], ['Offline & quiet', s => !s.tag]].map(([group, test]) =>
       '<div class="px-2 pt-3 pb-2 text-[11px] font-semibold text-faint uppercase tracking-[.08em]">' + group + '</div>' +
       '<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">' + STATIONS.filter(test).map(s => {
         const on = s.id === zonePrefs.station;
         return '<button data-act="zoneStation" data-st="' + s.id + '" class="text-left rounded-xl border p-3 transition-colors ' + (on ? 'bg-brand-soft border-brand shadow-[0_4px_14px_rgba(108,92,231,0.12)]' : 'bg-paper border-line hover:border-rule') + '">' +
           '<div class="flex items-center justify-between gap-2">' +
             '<span class="eq' + (on && music.playing ? '' : ' paused') + ' h-4 flex items-end gap-[2px] ' + (on ? 'text-brand' : 'text-faint') + '"><span></span><span></span><span></span><span></span></span>' +
-            '<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-canvas ' + (s.url || s.tag ? 'text-mute' : 'text-faint') + '">' + (s.url ? 'LIVE' : s.tag ? 'GENRE' : s.gen ? 'OFFLINE' : 'QUIET') + '</span>' +
+            '<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-canvas ' + (s.url || s.tag ? 'text-mute' : 'text-faint') + '">' + (s.focus ? 'LIVE' : s.tag ? 'GENRE' : s.gen ? 'OFFLINE' : 'QUIET') + '</span>' +
           '</div>' +
           '<div class="mt-2.5 text-[13px] font-semibold">' + s.name + '</div>' +
           '<div class="mt-0.5 text-[11px] text-mute leading-snug">' + s.vibe + '</div>' +
         '</button>';
       }).join('') + '</div>').join('') +
-    '<div class="px-2 pt-3 text-[11px] text-faint leading-relaxed">Focus radio is free, listener-supported <a href="https://somafm.com" target="_blank" rel="noopener" class="underline hover:text-ink">SomaFM</a>. ' +
-      'Genre channels play live stations from the open <a href="https://www.radio-browser.info" target="_blank" rel="noopener" class="underline hover:text-ink">Radio Browser</a> directory — use ↻ in the zone to hop to another station.</div>'
+    '<div class="px-2 pt-3 text-[11px] text-faint leading-relaxed">Live channels play stations from the open <a href="https://www.radio-browser.info" target="_blank" rel="noopener" class="underline hover:text-ink">Radio Browser</a> directory — use ↻ in the zone to hop to another station. ' +
+      'Brown noise and rain work without internet.</div>'
   );
 
   const recent = panel(
