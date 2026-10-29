@@ -894,6 +894,7 @@ const ICON = {
 
 const MOVE_DESTINATIONS = [
   ['now', 'Do It Now'],
+  ['today', 'Due Today'],
   ['inbox', 'Inbox'],
   ['next', 'Next Actions'],
   ['calendar', 'Calendar'],
@@ -934,8 +935,15 @@ function subtaskList(item) {
   '</details>';
 }
 
+// which Move option describes where the task is now ("Due Today" isn't a status — it's an actionable task due today)
+function moveCurrent(item) {
+  if (item.priority === 'urgent') return 'now';
+  if ((item.status === 'next' || item.status === 'calendar') && isTodayValue(item.dueTime)) return 'today';
+  return item.status;
+}
+
 function moveSelect(item) {
-  const current = item.priority === 'urgent' ? 'now' : item.status;
+  const current = moveCurrent(item);
   return '<select data-move-id="' + item.id + '" aria-label="Move ' + esc(item.action || item.text) + '" class="w-full border border-rule bg-paper px-2 py-1.5 text-[12px] text-body rounded-lg">' +
     MOVE_DESTINATIONS.map(([id, label]) =>
       '<option value="' + id + '"' + (id === current ? ' selected' : '') + '>' + (id === current ? 'In: ' : 'Move to: ') + label + '</option>'
@@ -952,6 +960,19 @@ function moveItem(item, destination) {
   }
 
   if (item.priority === 'urgent') item.priority = 'normal';
+
+  if (destination === 'today') {
+    // a real date (not the word "today"), so tomorrow it reads as overdue instead of staying due today
+    item.dueTime = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    if (item.status !== 'next' && item.status !== 'calendar') {
+      item.status = 'next';
+      item.context = item.context || CONTEXTS[0] || '@Anywhere';
+    }
+    return true;
+  }
+
+  // leaving Due Today: drop today's due date so it really moves
+  if (isTodayValue(item.dueTime)) delete item.dueTime;
 
   if (destination === 'next' && !item.context) {
     const context = prompt('Which context?', CONTEXTS[0] || '@Anywhere');
@@ -998,16 +1019,19 @@ function datePill(i) {
     return pill(esc(due), tone);
   }
   if (i.priority === 'urgent') return pill('Now', 'red');
-  return pill(fmtDate(i.created), i.priority === 'high' ? 'orange' : 'gray');
+  // the year only matters when it isn't this year, and leaves room for the time pill
+  const d = new Date(i.created);
+  const label = d.toLocaleDateString('en-GB', d.getFullYear() === new Date().getFullYear() ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
+  return pill(label, i.priority === 'high' ? 'orange' : 'gray');
 }
 
 function cardMeta(i) {
   const bits = [];
   if (timer && timer.id === i.id) bits.push('<span class="flex items-center gap-1.5 font-medium" style="color:' + TONE.green.fg + '"><span class="w-1.5 h-1.5 rounded-full" style="background:' + TONE.green.fg + '"></span>Focusing</span>');
-  if (i.box) bits.push('<button data-act="boxEdit" data-id="' + i.id + '" title="Time box" class="flex items-center gap-1 px-2 py-1 -my-1 rounded-md font-medium bg-brand-soft text-brand-dark hover:bg-[#E2DEFB]">' + ICON.clock + esc(boxLabel(i.box)) + '</button>');
+  if (i.box) bits.push('<button data-act="boxEdit" data-id="' + i.id + '" title="Time box" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-medium whitespace-nowrap flex-none bg-brand-soft text-brand-dark hover:bg-[#E2DEFB]">' + ICON.clock + esc(boxLabel(i.box)) + '</button>');
   else if (i.duration) bits.push('<span class="flex items-center gap-1">' + ICON.clock + i.duration + 'm</span>');
   if (i.notes) bits.push('<span class="flex items-center" title="' + esc(i.notes) + '">' + ICON.note + '</span>');
-  return '<div class="flex items-center gap-3 text-[12px] text-mute">' + bits.join('') + '</div>';
+  return '<div class="ml-auto flex items-center gap-3 text-[12px] text-mute whitespace-nowrap">' + bits.join('') + '</div>';
 }
 
 const menuItem = (label, attr, danger) =>
@@ -3750,7 +3774,7 @@ document.addEventListener('change', (e) => {
   if (!select) return;
   const item = items.find(i => i.id === select.dataset.moveId);
   if (!item) return;
-  const previous = item.priority === 'urgent' ? 'now' : item.status;
+  const previous = moveCurrent(item);
   if (!moveItem(item, select.value)) {
     select.value = previous;
     return;
