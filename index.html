@@ -1547,28 +1547,202 @@ function weekChart() {
   );
 }
 
-V.history = () => {
+/* what you actually did on a day: tasks completed that day, plus open tasks whose
+   subtasks were ticked that day — each shown with its subtasks */
+const timeOf = (t) => new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const historySubs = (h) => normSubs(((items.find(i => i.id === h.id)) || h.snapshot || {}).subtasks);
+
+function performedRows(list, dayT) {
+  return '<div class="bg-paper rounded-2xl border border-line overflow-hidden">' + list.map((p, n) => {
+    const subs = historySubs(p.h);
+    const done = subs.filter(s => s.done).length;
+    const task = items.find(i => i.id === p.h.id) || p.h.snapshot || {};
+    const mins = taskMins(task);
+    return (n ? '<div class="h-px bg-line2 mx-4"></div>' : '') +
+      '<div class="px-4 py-3.5">' +
+        '<div class="flex items-center gap-4">' +
+          '<div class="num text-faint w-[56px] flex-none">' + timeOf(p.at) + '</div>' +
+          '<div class="flex-1 min-w-0 text-[14px] font-medium">' + esc(p.h.text) + '</div>' +
+          (mins ? '<span class="flex items-center gap-1 text-[12px] text-mute flex-none">' + ICON.clock + fmtMins(mins) + '</span>' : '') +
+          (p.completed ? pill('Completed', 'green') : pill('In progress · ' + done + '/' + subs.length, 'orange')) +
+        '</div>' +
+        (subs.length ? '<div class="mt-2 ml-[72px] flex flex-col gap-1">' + subs.map(s => {
+          const today = s.done && s.doneAt && sameDay(s.doneAt, dayT);
+          return '<div class="flex items-center gap-2 text-[13px]">' +
+            (s.done
+              ? '<span class="w-4 h-4 rounded-full flex items-center justify-center flex-none text-[10px] text-paper" style="background:' + TONE.green.fg + '">✓</span>'
+              : '<span class="w-4 h-4 rounded-full border-[1.5px] border-rule flex-none"></span>') +
+            '<span class="' + (s.done ? 'text-body' : 'text-faint') + '">' + esc(s.text) + '</span>' +
+            (today ? '<span class="text-[11px] text-faint">· ' + timeOf(s.doneAt) + '</span>' : '') +
+          '</div>';
+        }).join('') + '</div>' : '') +
+      '</div>';
+  }).join('') + '</div>';
+}
+
+/* every day with activity in a range (null = all time), newest first:
+   { t: start of day, added: [log], performed: [{ h, at, completed }] } */
+function collectHistoryDays(range) {
   const days = new Map();
-  const range = historyPeriod.unit === 'all' ? null : periodRange(historyPeriod);
-  taskLog.filter(h => !range || inR(h.added, range)).sort((a, b) => b.added - a.added).forEach(h => {
-    const k = dayKey(h.added);
-    if (!days.has(k)) days.set(k, []);
-    days.get(k).push(h);
+  const inPeriod = (t) => !!t && (!range || inR(t, range));
+  const day = (t) => {
+    const k = dayKey(t);
+    if (!days.has(k)) days.set(k, { t: new Date(new Date(t).toDateString()).getTime(), added: [], performed: [] });
+    return days.get(k);
+  };
+  taskLog.slice().sort((a, b) => b.added - a.added).forEach(h => {
+    if (inPeriod(h.added)) day(h.added).added.push(h);
+    if (inPeriod(h.completed)) day(h.completed).performed.push({ h, at: h.completed, completed: true });
   });
-  return head('History', 'Every task you added, grouped by the day it was captured, and whether you finished it that day.') +
-    periodControl(historyPeriod, 'history', true) +
+  // open tasks with subtasks ticked on a day count as work done that day
+  items.forEach(i => {
+    const h = taskLog.find(x => x.id === i.id);
+    if (!h || h.completed) return;
+    const byDay = new Map();
+    normSubs(i.subtasks).forEach(s => {
+      if (s.done && inPeriod(s.doneAt)) { const k = dayKey(s.doneAt); byDay.set(k, Math.max(byDay.get(k) || 0, s.doneAt)); }
+    });
+    byDay.forEach(at => day(at).performed.push({ h, at, completed: false }));
+  });
+  const dayList = Array.from(days.values()).sort((a, b) => b.t - a.t);
+  dayList.forEach(d => d.performed.sort((a, b) => b.at - a.at));
+  return dayList;
+}
+
+/* ── activity calendar: a wide 6-month heatmap + a month calendar; click a day to see it ── */
+let historyDay = null;   // dayKey of the selected day, or null for all days
+let historyDayT = null;  // that day's timestamp
+let historyMonth = null; // timestamp of the 1st of the month shown
+
+const HEAT = ['', 'rgba(108,92,231,.2)', 'rgba(108,92,231,.4)', 'rgba(108,92,231,.65)', 'rgba(108,92,231,.92)'];
+const heatLevel = (n) => !n ? 0 : n === 1 ? 1 : n <= 3 ? 2 : n <= 5 ? 3 : 4;
+const shortDate = (t, opts) => new Date(t).toLocaleDateString('en-GB', opts || { weekday: 'short', day: 'numeric', month: 'short' });
+
+function dayTip(t, d) {
+  if (!d) return shortDate(t) + ' · nothing logged';
+  const done = d.performed.filter(p => p.completed).length, prog = d.performed.length - done;
+  return shortDate(t) + ' · ' + done + ' completed' + (prog ? ', ' + prog + ' in progress' : '') + ' · ' + d.added.length + ' added';
+}
+
+function historyCalendar(all) {
+  const byKey = new Map(all.map(d => [dayKey(d.t), d]));
+  const now = new Date(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const level = (d) => heatLevel(d ? d.performed.length : 0);
+  const cellStyle = (d) => { const l = level(d); return l ? 'background:' + HEAT[l] : ''; };
+
+  /* wide strip: 26 weeks, one column per week (Mon → Sun) */
+  const WEEKS = 26;
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7) - (WEEKS - 1) * 7);
+  let strip = '', labels = '', activeDays = 0, stripDone = 0;
+  for (let w = 0; w < WEEKS; w++) {
+    const first = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + w * 7);
+    const prev = new Date(first.getFullYear(), first.getMonth(), first.getDate() - 7);
+    labels += '<div class="text-[10px] text-faint whitespace-nowrap overflow-visible">' + (w === 0 || first.getMonth() !== prev.getMonth() ? shortDate(first, { month: 'short' }) : '') + '</div>';
+    for (let dd = 0; dd < 7; dd++) {
+      const dt = new Date(first.getFullYear(), first.getMonth(), first.getDate() + dd), t = dt.getTime();
+      if (t > today) { strip += '<div></div>'; continue; }
+      const k = dayKey(t), d = byKey.get(k);
+      if (d && d.performed.length) { activeDays++; stripDone += d.performed.filter(p => p.completed).length; }
+      strip += '<button data-act="histDay" data-day="' + t + '" title="' + esc(dayTip(t, d)) + '" aria-label="' + esc(dayTip(t, d)) + '" class="aspect-square w-full rounded-[3px] ' + (level(d) ? '' : 'bg-line2 ') + 'hover:ring-2 hover:ring-brand/40' + (historyDay === k ? ' ring-2 ring-brand' : '') + (t === today ? ' outline outline-1 outline-offset-1 outline-ink/30' : '') + '" style="' + cellStyle(d) + '"></button>';
+    }
+  }
+  const gridCols = 'display:grid;grid-template-columns:repeat(' + WEEKS + ',minmax(0,1fr));gap:3px';
+  const legend = '<div class="flex items-center gap-1.5 text-[11px] text-faint">Less' + [0, 1, 2, 3, 4].map(l =>
+    '<span class="w-3 h-3 rounded-[3px] ' + (l ? '' : 'bg-line2') + '" style="' + (l ? 'background:' + HEAT[l] : '') + '"></span>').join('') + 'More</div>';
+
+  const wide =
+    '<div class="min-w-0">' +
+      '<div class="flex items-end justify-between gap-3 px-1 pb-3">' +
+        '<div><div class="text-[13px] font-medium text-mute">Last 6 months</div>' +
+        '<div class="mt-1 text-[13px]"><span class="font-semibold">' + activeDays + '</span> <span class="text-mute">days with work ·</span> <span class="font-semibold">' + stripDone + '</span> <span class="text-mute">tasks completed</span></div></div>' +
+        legend +
+      '</div>' +
+      '<div class="flex gap-2">' +
+        '<div class="flex flex-col justify-between py-[1px] text-[10px] text-faint pt-[18px]" style="gap:3px">' + ['Mon', '', 'Wed', '', 'Fri', '', 'Sun'].map(l => '<div class="leading-none flex-1 flex items-center">' + l + '</div>').join('') + '</div>' +
+        '<div class="flex-1 min-w-0">' +
+          '<div class="mb-1 h-[14px]" style="' + gridCols + '">' + labels + '</div>' +
+          '<div style="' + gridCols.replace('grid-template-columns:repeat(' + WEEKS + ',minmax(0,1fr))', 'grid-template-rows:repeat(7,auto);grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)') + '">' + strip + '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  /* month calendar */
+  const m0 = new Date(historyMonth || new Date(now.getFullYear(), now.getMonth(), 1).getTime());
+  const y = m0.getFullYear(), m = m0.getMonth();
+  const lead = (m0.getDay() + 6) % 7, daysIn = new Date(y, m + 1, 0).getDate();
+  let cells = '', mDone = 0, mActive = 0, mMins = 0;
+  for (let n = 0; n < lead; n++) cells += '<div></div>';
+  for (let day = 1; day <= daysIn; day++) {
+    const t = new Date(y, m, day).getTime(), k = dayKey(t), d = byKey.get(k);
+    const done = d ? d.performed.filter(p => p.completed).length : 0, l = level(d);
+    if (d && d.performed.length) mActive++;
+    mDone += done;
+    if (d) mMins += d.performed.filter(p => p.completed).reduce((s, p) => s + taskMins(items.find(i => i.id === p.h.id) || p.h.snapshot || {}), 0);
+    const future = t > today;
+    cells += '<button data-act="histDay" data-day="' + t + '"' + (future ? ' disabled' : '') + ' title="' + esc(dayTip(t, d)) + '" class="relative h-[52px] rounded-lg border text-left px-1.5 py-1 transition-colors ' +
+      (historyDay === k ? 'border-brand ring-2 ring-brand/30 ' : t === today ? 'border-ink/40 ' : 'border-line ') + (future ? 'opacity-40 cursor-default ' : 'hover:border-brand ') + (l ? '' : 'bg-paper') + '" style="' + cellStyle(d) + '">' +
+      '<span class="block text-[11px] font-semibold ' + (l >= 3 ? 'text-paper' : 'text-body') + '">' + day + '</span>' +
+      (done ? '<span class="absolute bottom-1 left-1.5 text-[10px] font-semibold ' + (l >= 3 ? 'text-paper' : 'text-brand-dark') + '">' + done + ' done</span>'
+        : d && d.performed.length ? '<span class="absolute bottom-1 left-1.5 text-[10px] ' + (l >= 3 ? 'text-paper' : 'text-mute') + '">in progress</span>'
+        : d && d.added.length ? '<span class="absolute bottom-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-rule" title="Tasks added"></span>' : '') +
+    '</button>';
+  }
+  const navBtn = (label, step, aria) => '<button data-act="histMonth" data-step="' + step + '" aria-label="' + aria + '" class="w-7 h-7 rounded-lg border border-rule flex items-center justify-center text-[13px] hover:bg-canvas">' + label + '</button>';
+  const month =
+    '<div class="min-w-0">' +
+      '<div class="flex items-center justify-between gap-2 px-1 pb-3">' +
+        '<div><div class="text-[15px] font-semibold">' + shortDate(m0, { month: 'long', year: 'numeric' }) + '</div>' +
+        '<div class="mt-0.5 text-[12px] text-mute">' + mActive + ' active days · ' + mDone + ' done' + (mMins ? ' · ' + fmtMins(mMins) : '') + '</div></div>' +
+        '<div class="flex items-center gap-1">' + navBtn('‹', -1, 'Previous month') +
+          '<button data-act="histMonth" data-step="0" class="px-2.5 h-7 rounded-lg border border-rule text-[12px] font-medium hover:bg-canvas">Today</button>' +
+          navBtn('›', 1, 'Next month') + '</div>' +
+      '</div>' +
+      '<div class="grid grid-cols-7 gap-1 mb-1">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(l => '<div class="text-[10px] font-semibold text-faint text-center">' + l + '</div>').join('') + '</div>' +
+      '<div class="grid grid-cols-7 gap-1">' + cells + '</div>' +
+    '</div>';
+
+  return panel('<div class="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)] p-1">' + wide + month + '</div>');
+}
+
+V.history = () => {
+  const range = historyPeriod.unit === 'all' ? null : periodRange(historyPeriod);
+  const all = collectHistoryDays(null);
+  const picked = historyDay && all.find(d => dayKey(d.t) === historyDay);
+  const dayList = historyDay ? (picked ? [picked] : []) : range ? collectHistoryDays(range) : all;
+  const days = { size: dayList.length };
+  const totalAdded = dayList.reduce((n, d) => n + d.added.length, 0);
+  const sub = (label, n) => '<div class="px-2 pt-2 pb-2 text-[12px] font-semibold text-faint uppercase tracking-[.08em]">' + label + ' (' + n + ')</div>';
+
+  return head('History', 'Everything you did each day — completed tasks and their subtasks — plus what you captured.') +
+    (historyDay ? '' : periodControl(historyPeriod, 'history', true)) +
     '<div class="flex-1 overflow-y-auto scroll px-4 sm:px-6 md:px-14 pb-10 flex flex-col gap-5">' +
-      (range ? panel(panelTitle('Completed vs added · ' + periodLabel(historyPeriod), days.size ? Array.from(days.values()).reduce((n, l) => n + l.length, 0) : 0) + '<div class="px-2 pb-1">' + doneAddedChart(range) + '</div>')
+      historyCalendar(all) +
+      (historyDay
+        ? '<div class="flex items-center justify-between gap-3 px-1">' +
+            '<div class="text-[14px]"><span class="text-mute">Showing</span> <span class="font-semibold">' + shortDate(historyDayT, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + '</span></div>' +
+            '<button data-act="histDay" data-day="" class="px-3 py-1.5 rounded-lg border border-rule text-[12px] font-medium hover:bg-canvas">← All days</button>' +
+          '</div>' +
+          (picked ? '' : emptyDrop('Nothing was done or added on this day.', 'history'))
+        : '') +
+      (historyDay ? '' : range ? panel(panelTitle('Completed vs added · ' + periodLabel(historyPeriod), totalAdded) + '<div class="px-2 pb-1">' + doneAddedChart(range) + '</div>')
         : days.size ? weekChart() : '') +
-      (range && !days.size ? emptyDrop('Nothing was added in this period. Try another ' + historyPeriod.unit + '.', 'history') : '') +
-      (days.size ? Array.from(days.values()).map(list => {
+      (!historyDay && range && !days.size ? emptyDrop('Nothing happened in this period. Try another ' + historyPeriod.unit + '.', 'history') : '') +
+      (days.size ? dayList.map(d => {
+        const list = d.added;
+        const completed = d.performed.filter(p => p.completed);
+        const subsDone = d.performed.reduce((n, p) => n + historySubs(p.h).filter(s => s.done && s.doneAt && sameDay(s.doneAt, d.t)).length, 0);
+        const doneMins = completed.reduce((n, p) => n + taskMins(items.find(i => i.id === p.h.id) || p.h.snapshot || {}), 0);
         const sameDayDone = list.filter(h => h.completed && sameDay(h.added, h.completed)).length;
         return panel(
-          '<div class="flex items-end justify-between gap-6 px-2 pt-1 pb-3">' +
-            '<div><div class="text-[15px] font-semibold">' + dayLabel(list[0].added) + '</div>' +
-            '<div class="mt-1 text-[13px] text-mute">' + list.length + ' added · ' + sameDayDone + ' finished same day</div></div>' +
-            '<div class="w-[200px] flex-none"><div class="flex justify-between text-[12px] mb-1.5"><span class="text-mute">Progress</span><span class="font-semibold">' + sameDayDone + '/' + list.length + '</span></div>' + progressBar(sameDayDone, list.length) + '</div>' +
+          '<div class="flex flex-wrap items-end justify-between gap-6 px-2 pt-1 pb-3">' +
+            '<div><div class="text-[15px] font-semibold">' + dayLabel(d.t) + '</div>' +
+            '<div class="mt-1 text-[13px] text-mute">' + completed.length + ' completed' + (doneMins ? ' · ' + fmtMins(doneMins) + ' of work' : '') +
+              (subsDone ? ' · ' + subsDone + ' subtask' + (subsDone === 1 ? '' : 's') + ' ticked' : '') + ' · ' + list.length + ' added</div></div>' +
+            (list.length ? '<div class="w-[200px] flex-none"><div class="flex justify-between text-[12px] mb-1.5"><span class="text-mute">Added & done same day</span><span class="font-semibold">' + sameDayDone + '/' + list.length + '</span></div>' + progressBar(sameDayDone, list.length) + '</div>' : '') +
           '</div>' +
+          sub('Performed', d.performed.length) +
+          (d.performed.length ? performedRows(d.performed, d.t) : '<div class="px-2 pb-2 text-[13px] text-faint">Nothing completed this day.</div>') +
+          (list.length ? sub('Added', list.length) +
           '<div class="bg-paper rounded-2xl border border-line overflow-hidden">' +
           list.map((h, n) => {
             const [label, tone] = historyOutcome(h);
@@ -1582,10 +1756,10 @@ V.history = () => {
               '</div>' +
               (open ? historyDetails(h) : '');
           }).join('') +
-          '</div>'
+          '</div>' : '')
         );
       }).join('')
-        : emptyDrop('No history yet. Tasks you capture will show up here.', 'history')) +
+        : historyDay || range ? '' : emptyDrop('No history yet. Tasks you capture will show up here.', 'history')) +
     '</div>';
 };
 
@@ -4070,7 +4244,7 @@ function openDetailsModal(taskId) {
   draftPriority = item.priority || 'normal';
   renderPriorityButtons();
 
-  draftSubtasks = normSubs(item.subtasks).map(s => ({ text: s.text, done: !!s.done }));
+  draftSubtasks = normSubs(item.subtasks).map(s => ({ text: s.text, done: !!s.done, doneAt: s.doneAt || null }));
   renderSubtasksList();
 
   document.getElementById('detailsModal').classList.remove('hidden');
@@ -4137,7 +4311,9 @@ document.getElementById('newSubtaskInput').addEventListener('keydown', (e) => {
 document.getElementById('subtasksList').addEventListener('click', (e) => {
   const toggle = e.target.closest('[data-toggle-subtask]');
   if (toggle) {
-    draftSubtasks[parseInt(toggle.dataset.toggleSubtask)].done = toggle.checked;
+    const ds = draftSubtasks[parseInt(toggle.dataset.toggleSubtask)];
+    ds.done = toggle.checked;
+    ds.doneAt = toggle.checked ? Date.now() : null;
     play(toggle.checked ? 'check' : 'uncheck');
     renderSubtasksList();
     return;
@@ -4631,6 +4807,23 @@ document.addEventListener('click', (e) => {
   if (a === 'boxDay') { boxDay = act.dataset.day; render(); return; }
   if (a === 'timerStart') { startTimer(id); return; }
 
+  if (a === 'histDay') {
+    const t = Number(act.dataset.day);
+    if (!t || historyDay === dayKey(t)) { historyDay = null; historyDayT = null; }
+    else {
+      historyDay = dayKey(t); historyDayT = t;
+      const d = new Date(t); historyMonth = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    }
+    play('tick'); render();
+    return;
+  }
+  if (a === 'histMonth') {
+    const step = Number(act.dataset.step), now = new Date();
+    const cur = new Date(historyMonth || new Date(now.getFullYear(), now.getMonth(), 1).getTime());
+    historyMonth = step ? new Date(cur.getFullYear(), cur.getMonth() + step, 1).getTime() : new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    play('tick'); render();
+    return;
+  }
   if (a === 'historyToggle') {
     historyOpen.has(id) ? historyOpen.delete(id) : historyOpen.add(id);
     render();
@@ -4745,7 +4938,7 @@ document.addEventListener('change', (e) => {
     if (!item) return;
     item.subtasks = normSubs(item.subtasks);
     const s = item.subtasks[parseInt(sub.dataset.subIndex)];
-    if (s) s.done = sub.checked;
+    if (s) { s.done = sub.checked; s.doneAt = sub.checked ? Date.now() : null; }
     play(sub.checked ? (item.subtasks.every(x => x.done) ? 'success' : 'check') : 'uncheck');
     persist();
     render();
