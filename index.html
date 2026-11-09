@@ -498,7 +498,7 @@ tailwind.config = {
       </div>
 
       <div class="mb-4">
-        <label class="text-[12px] font-semibold text-label mb-2 block">Duration (minutes)</label>
+        <label class="text-[12px] font-semibold text-label mb-2 block">Duration (minutes) <span class="text-[#E5534B]">*</span></label>
         <input id="detailsDuration" type="number" min="1" placeholder="How long will this take?" class="w-full border border-rule rounded-xl px-3 py-2.5 text-[13px]">
       </div>
 
@@ -647,6 +647,7 @@ tailwind.config = {
     </div>
     <form id="quickCaptureForm">
       <input id="quickCaptureInput" type="text" autocomplete="off" placeholder="What’s on your mind?" class="w-full border border-rule rounded-xl px-4 py-3 text-[15px] mb-3" required>
+      <div id="quickCaptureDur" class="mb-3"></div>
       <div class="flex items-center justify-between text-[12px] text-mute mb-4">
         <span>Capture immediately to Inbox</span>
         <span class="hidden sm:inline text-faint">Press Enter to save</span>
@@ -888,6 +889,54 @@ function getAgenda() {
   return { now, today, next };
 }
 
+/* Today's workload = everything in "Do now" + "Due today". Capped at 7 tasks
+   so the day stays doable; each task's time comes from its duration (or its
+   time box when it has no duration). */
+const TODAY_LIMIT = 7;
+const DURATIONS = [15, 30, 45, 60, 90, 120];
+const taskMins = (i) => Number(i.duration) || (i.box && i.box.minutes) || 0;
+
+function todayLoad() {
+  const a = getAgenda();
+  const list = [...a.now, ...a.today];
+  return { list, count: list.length, mins: list.reduce((s, i) => s + taskMins(i), 0), missing: list.filter(i => !taskMins(i)).length };
+}
+
+/* duration chips + a custom-minutes box; used wherever a task is created */
+function durationPicker(sel) {
+  sel = Number(sel) || 0;
+  return '<div class="flex flex-wrap items-center gap-1.5">' +
+    '<span class="text-[12px] font-medium text-mute mr-1">How long?</span>' +
+    DURATIONS.map(m => '<label class="cursor-pointer"><input type="radio" name="dur" value="' + m + '"' + (sel === m ? ' checked' : '') + ' class="peer sr-only">' +
+      '<span class="block px-2.5 py-1 rounded-lg border border-rule text-[12px] text-body hover:bg-canvas peer-checked:bg-brand peer-checked:border-brand peer-checked:text-paper">' + fmtMins(m) + '</span></label>').join('') +
+    '<input name="durc" type="number" min="1" placeholder="min" aria-label="Custom minutes" value="' + (sel && !DURATIONS.includes(sel) ? sel : '') + '" class="w-[64px] border border-rule rounded-lg px-2 py-1 text-[12px] bg-paper">' +
+  '</div>';
+}
+
+function readDuration(root) {
+  const c = root.querySelector('[name="durc"]'), r = root.querySelector('[name="dur"]:checked');
+  return parseInt(c && c.value) || (r ? parseInt(r.value) : 0);
+}
+
+// picking a chip clears the custom box and vice versa
+document.addEventListener('change', (e) => {
+  if (e.target.name !== 'dur') return;
+  const box = e.target.closest('div').querySelector('[name="durc"]');
+  if (box) box.value = '';
+});
+document.addEventListener('input', (e) => {
+  if (e.target.name !== 'durc') return;
+  e.target.closest('div').querySelectorAll('[name="dur"]').forEach(r => { r.checked = false; });
+});
+
+function roomForToday(item) {
+  const { list } = todayLoad();
+  if (item && list.some(i => i.id === item.id)) return true; // already counted
+  if (list.length < TODAY_LIMIT) return true;
+  showNotification('Today is full — ' + TODAY_LIMIT + ' tasks max. Finish or move one out first.', 'error');
+  return false;
+}
+
 const NAV = [
   { id: 'now', label: 'Today / Now', count: () => {
     const agenda = getAgenda();
@@ -1093,6 +1142,7 @@ function moveSelect(item) {
 }
 
 function moveItem(item, destination) {
+  if ((destination === 'now' || destination === 'today') && !roomForToday(item)) return false;
   if (destination === 'now') {
     item.priority = 'urgent';
     item.status = 'next';
@@ -1249,8 +1299,11 @@ const panelTitle = (title, n, color) =>
 function board(cols) {
   return '<div class="flex-1 overflow-y-auto scroll px-4 sm:px-6 md:px-14 pb-10">' +
     '<div class="grid gap-5 items-start" style="grid-template-columns:repeat(auto-fit,minmax(min(270px,100%),1fr))">' +
-      cols.map(([title, list, empty, art, color, colKey]) => panel(
-        panelTitle(title, list.length, color) +
+      cols.map(([title, list, empty, art, color, colKey, withTime]) => panel(
+        (withTime
+          ? '<div class="flex items-center justify-between gap-2">' + panelTitle(title, list.length, color) +
+              '<span class="px-2 pb-3 text-[12px] font-semibold text-body flex items-center gap-1">' + ICON.clock + fmtMins(list.reduce((s, i) => s + taskMins(i), 0)) + '</span></div>'
+          : panelTitle(title, list.length, color)) +
         '<div class="drop-column flex flex-col gap-3 min-h-[140px] rounded-xl transition-all p-1" data-col-key="' + (colKey || title) + '">' +
           (list.length ? list.map(taskCard).join('') : emptyDrop(empty, art)) +
         '</div>'
@@ -1305,13 +1358,14 @@ function todayStats(agenda) {
   const done = taskLog.filter(h => sameDay(h.completed, Date.now())).length;
   const left = agenda.now.length + agenda.today.length;
   const focusSec = (focusLog[today] || 0) + (timer && timer.segStart ? (Date.now() - timer.segStart) / 1000 : 0);
-  const boxes = dayBoxes(today);
-  const planned = boxes.reduce((s, i) => s + i.box.minutes, 0);
+  const load = todayLoad();
   const streak = streakDays();
   return '<div class="px-4 sm:px-6 md:px-14 pb-5 flex-none grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">' +
     statTile(0, ringSvg(done + left ? done / (done + left) : 0), 'Done today', done, left ? left + ' still due' : done ? 'All clear' : 'None finished') +
     statTile(1, tileIcon('<circle cx="8" cy="8.5" r="5.5"/><path d="M8 5.5v3l2 1.3M6.5 1.5h3"/>', 'deepwork'), 'Focused', fmtMins(Math.floor(focusSec / 60)), timer ? '<span class="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle fx-pulse" style="background:' + TONE.green.fg + '"></span>Running' : 'With timer') +
-    statTile(2, tileIcon(NAV_ICON.timebox, 'timebox'), 'Planned', fmtMins(planned), boxes.length + ' box' + (boxes.length === 1 ? '' : 'es')) +
+    statTile(2, tileIcon(NAV_ICON.timebox, 'timebox'), 'Today’s workload', fmtMins(load.mins),
+      '<span' + (load.count >= TODAY_LIMIT ? ' style="color:' + TONE.red.fg + '"' : '') + '>' + load.count + ' / ' + TODAY_LIMIT + ' tasks</span>' +
+      (load.missing ? ' · ' + load.missing + ' untimed' : '')) +
     statTile(3, tileIcon('<path d="M8 14.5c-2.8 0-4.5-1.9-4.5-4.3 0-2.9 2.6-4 2.6-7.7 2.2 1.2 3.4 3 3.6 4.6.6-.4 1-1.2 1.1-2 1.2 1.2 1.7 2.8 1.7 4.6 0 2.8-1.8 4.8-4.5 4.8z"/>', 'now'), 'Streak', streak + (streak === 1 ? ' day' : ' days'), streak ? 'Keep momentum' : 'Finish 1 task') +
   '</div>';
 }
@@ -1328,8 +1382,8 @@ V.now = () => {
     btn('Capture something', 'data-go="inbox"')) +
     todayStats(agenda) +
     board([
-      ['Do now', agenda.now, 'Nothing urgent right now. Breathe.', 'check', '#E5534B', 'now'],
-      ['Due today', agenda.today, 'Nothing else is due today.', 'calendar', '#F97316', 'today'],
+      ['Do now', agenda.now, 'Nothing urgent right now. Breathe.', 'check', '#E5534B', 'now', true],
+      ['Due today', agenda.today, 'Nothing else is due today.', 'calendar', '#F97316', 'today', true],
       ['Next in line', agenda.next, 'Process your inbox to create next actions.', 'inbox', '#10B981', 'next']
     ]);
 };
@@ -1341,6 +1395,7 @@ V.inbox = () => {
     '<div class="px-4 sm:px-6 md:px-14 pb-6 flex-none">' +
       '<form data-act="capture" class="bg-paper rounded-2xl border border-line shadow-[0_1px_2px_rgba(16,16,24,0.04),0_4px_14px_rgba(16,16,24,0.04)] px-[22px] py-5 flex flex-col gap-4">' +
         '<input name="text" autocomplete="off" class="text-lg w-full bg-transparent" placeholder="What’s on your mind?">' +
+        durationPicker() +
         '<div class="flex items-center justify-between border-t border-line2 pt-3.5">' +
           '<div class="num text-faint">Capture only — no lists, no tags, no deciding</div>' +
           '<div class="flex items-center gap-2 num text-mute"><span class="border border-rule rounded-md px-[7px] py-[3px]">C</span><span>capture from anywhere</span></div>' +
@@ -1838,7 +1893,9 @@ document.getElementById('boxSave').addEventListener('click', () => {
   const start = document.getElementById('boxStart').value;
   const minutes = parseInt(document.getElementById('boxLen').value);
   if (!item || !date || !start || !(minutes > 0)) { showNotification('Pick a day, start time and length.', 'error'); return; }
+  if (date === ymd(new Date()) && !roomForToday(item)) return;
   item.box = { date, start, minutes };
+  if (!item.duration) item.duration = minutes;
   const s = toMin(start), e = s + minutes;
   const clash = dayBoxes(date).find(o => o !== item && toMin(o.box.start) < e && toMin(o.box.start) + o.box.minutes > s);
   persist();
@@ -1907,11 +1964,42 @@ function celebrate(x, y) {
 
 const centerOf = (el) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
 
+/* ── breaks ──
+   A short pause in a focus session: the focus clock stops, the music dips, and
+   after at most 4 minutes the session picks up again on its own. */
+const BREAK_MAX = 4;
+let brk = null; // { endsAt, total }
+
+function startBreak(min) {
+  if (!timer || brk) return;
+  min = Math.min(BREAK_MAX, Math.max(1, min || BREAK_MAX));
+  if (timer.endsAt) pauseTimer();
+  brk = { endsAt: Date.now() + min * 60000, total: min * 60000 };
+  music.duck = 0.3; applyMusicVolume(1.5);
+  play('pause');
+  showNotification(min + '-minute break — stand up, stretch, look away from the screen', 'info');
+  renderTimerBar();
+  if (zone && zoneShown) renderZone();
+}
+
+function endBreak(auto) {
+  if (!brk) return;
+  brk = null;
+  if (timer && !timer.endsAt) resumeTimer();
+  music.duck = 1; applyMusicVolume(1.5);
+  if (auto) {
+    beep();
+    showNotification('Break’s over — back to focus', 'success');
+  } else play('start');
+  renderTimerBar();
+  if (zone && zoneShown) renderZone();
+}
+
 function startTimer(id, minutes) {
   const it = items.find(i => i.id === id);
   if (!it) return;
   if (timer) stopTimer();
-  const ms = (minutes || (it.box && it.box.minutes) || it.duration || 25) * 60000;
+  const ms = (minutes || taskMins(it) || 25) * 60000; // the task's own duration sets the clock
   timer = { id, total: ms, endsAt: Date.now() + ms, remaining: null, segStart: Date.now(), alerted: false };
   play('start');
   saveTimer();
@@ -1943,6 +2031,7 @@ function extendTimer(min) {
 
 function stopTimer() {
   if (!timer) return;
+  if (brk) { brk = null; music.duck = 1; }
   bankTime();
   timer = null;
   saveTimer(); persist();
@@ -1975,17 +2064,20 @@ function renderTimerBar() {
     '<div class="flex items-center gap-4">' +
       '<div class="flex-1 min-w-0">' +
         '<div class="flex items-center gap-2 text-[11px] text-paper/50 font-medium">' +
-          '<span class="w-1.5 h-1.5 rounded-full flex-none' + (timer.endsAt ? ' fx-pulse' : '') + '" style="background:' + (timer.endsAt ? TONE.green.fg : '#8A8A94') + '"></span>' +
-          (timer.endsAt ? 'Focusing' : 'Paused') + (it.box ? ' · box ' + boxRange(it.box) : '') + '</div>' +
+          '<span class="w-1.5 h-1.5 rounded-full flex-none' + (timer.endsAt || brk ? ' fx-pulse' : '') + '" style="background:' + (brk ? TONE.orange.fg : timer.endsAt ? TONE.green.fg : '#8A8A94') + '"></span>' +
+          (brk ? 'On break · back to focus in' : (timer.endsAt ? 'Focusing' : 'Paused') + (it.box ? ' · box ' + boxRange(it.box) : '')) + '</div>' +
         '<div class="mt-0.5 text-[14px] font-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(it.action || it.text) + '</div>' +
       '</div>' +
       '<div id="timerClock" class="text-[26px] font-semibold tabular-nums tracking-tight flex-none"></div>' +
     '</div>' +
     '<div class="mt-2.5 h-1 rounded-full bg-white/15 overflow-hidden"><div id="timerProg" class="h-1 rounded-full" style="width:0%"></div></div>' +
     '<div class="mt-2.5 flex items-center gap-1 -mx-1.5">' +
-      timerBtn(timer.endsAt ? 'Pause' : 'Resume', timer.endsAt ? 'pause' : 'resume') +
-      timerBtn('+5 min', 'extend') +
-      timerBtn(zone ? 'End' : 'Stop', 'stop') +
+      (brk
+        ? timerBtn('Back to focus', 'breakEnd')
+        : timerBtn(timer.endsAt ? 'Pause' : 'Resume', timer.endsAt ? 'pause' : 'resume') +
+          timerBtn('+5 min', 'extend') +
+          timerBtn('Break', 'break') +
+          timerBtn(zone ? 'End' : 'Stop', 'stop')) +
       '<div class="flex-1"></div>' +
       (zone ? timerBtn('◎ Zone', 'zone') : '') +
       timerBtn('✓ Done', 'done', true) +
@@ -1998,6 +2090,21 @@ function tickTimer() {
   const it = items.find(i => i.id === timer.id);
   const clock = document.getElementById('timerClock');
   if (!it) return;
+  if (brk) {
+    const bl = brk.endsAt - Date.now();
+    if (bl <= 0) { endBreak(true); return; }
+    if (clock) {
+      clock.textContent = fmtClock(bl);
+      clock.style.color = '';
+      const prog = document.getElementById('timerProg');
+      prog.style.width = Math.min(100, (1 - bl / brk.total) * 100) + '%';
+      prog.style.background = TONE.orange.fg;
+    }
+    const bc = document.getElementById('breakClock');
+    if (bc) bc.textContent = fmtClock(bl);
+    document.title = '☕ ' + fmtClock(bl) + ' · break';
+    return;
+  }
   const left = timerLeft();
   const over = left <= 0;
   if (clock) {
@@ -2028,6 +2135,8 @@ document.getElementById('timerBar').addEventListener('click', (e) => {
     showZone();
     return;
   }
+  if (t === 'break') { startBreak(BREAK_MAX); return; }
+  if (t === 'breakEnd') { endBreak(false); return; }
   if (t === 'pause') { pauseTimer(); play('pause'); }
   if (t === 'resume') { resumeTimer(); play('start'); }
   if (t === 'extend') play('tick');
@@ -2042,11 +2151,16 @@ setInterval(tickTimer, 1000);
 /* every sound is made in the browser — the music channels are composed live (see "generated music"),
    so nothing streams and it all works offline */
 const STATIONS = [
-  { id: 'mix',   name: 'Focus Mix',        vibe: 'R&B, study jazz, lo-fi & deep focus, blended', style: 'mix' },
+  { id: 'mix',   name: 'Focus Mix',        vibe: 'All nine styles, one after another', style: 'mix' },
   { id: 'rnb',   name: 'R&B Instrumental', vibe: 'Neo-soul keys, warm bass, laid-back drums',   style: 'rnb' },
   { id: 'jazz',  name: 'Study Jazz',       vibe: 'Walking bass, brushes, piano',               style: 'jazz' },
   { id: 'lofi',  name: 'Lo-fi Soul',       vibe: 'Dusty beats and vinyl crackle',              style: 'lofi' },
   { id: 'deep',  name: 'Deep Focus',       vibe: 'Slow pads, soft piano, no drums',            style: 'focus' },
+  { id: 'bossa', name: 'Bossa Nova',       vibe: 'Gentle Brazilian groove, rim clicks, nylon-soft keys', style: 'bossa' },
+  { id: 'chill', name: 'Chillhop Café',    vibe: 'Jazzy chords over a head-nod beat',          style: 'chill' },
+  { id: 'piano', name: 'Solo Piano',       vibe: 'Flowing arpeggios, warm and unhurried',      style: 'piano' },
+  { id: 'amb',   name: 'Ambient Drift',    vibe: 'Floating pads and slow arpeggios, no beat',  style: 'ambient' },
+  { id: 'night', name: 'Late Night Soul',  vibe: 'Slow jam keys, deep bass, soft pads',        style: 'night' },
   { id: 'brown',  name: 'Brown noise',  vibe: 'Steady, warm rumble',   gen: 'brown' },
   { id: 'rain',   name: 'Soft rain',    vibe: 'Gentle rainfall',       gen: 'rain' },
   { id: 'none',   name: 'Silence',      vibe: 'Just you and the timer' }
@@ -2157,9 +2271,14 @@ const STYLES = {
   rnb:   { name: 'R&B Instrumental', bpm: [76, 88],  swing: 0.16, unit: 16, beatsPerChord: 4, progs: 'soul',  drums: 'rnb',  bass: 'groove', keys: 'soul', melody: 0.35, crackle: false, tone: 4600 },
   jazz:  { name: 'Study Jazz',       bpm: [92, 112], swing: 0.32, unit: 8,  beatsPerChord: 4, progs: 'jazz',  drums: 'jazz', bass: 'walk',   keys: 'jazz', melody: 0.45, crackle: false, tone: 5200 },
   lofi:  { name: 'Lo-fi Soul',       bpm: [70, 80],  swing: 0.22, unit: 16, beatsPerChord: 4, progs: 'soul',  drums: 'lofi', bass: 'groove', keys: 'soul', melody: 0.3,  crackle: true,  tone: 2300 },
-  focus: { name: 'Deep Focus',       bpm: [58, 66],  swing: 0,    unit: 16, beatsPerChord: 8, progs: 'focus', drums: null,   bass: 'drone',  keys: 'pad',  melody: 0.3,  crackle: false, tone: 3000 }
+  focus: { name: 'Deep Focus',       bpm: [58, 66],  swing: 0,    unit: 16, beatsPerChord: 8, progs: 'focus', drums: null,   bass: 'drone',  keys: 'pad',  melody: 0.3,  crackle: false, tone: 3000, soft: true, verb: 0.5 },
+  bossa: { name: 'Bossa Nova',       bpm: [118, 134], swing: 0,   unit: 16, beatsPerChord: 8, progs: 'jazz',  drums: 'bossa', bass: 'bossa', keys: 'bossa', melody: 0.4, crackle: false, tone: 4800, verb: 0.24 },
+  chill: { name: 'Chillhop Café',    bpm: [84, 94],  swing: 0.14, unit: 16, beatsPerChord: 4, progs: 'jazz',  drums: 'rnb',  bass: 'groove', keys: 'jazz', melody: 0.4,  crackle: true,  tone: 3400 },
+  piano: { name: 'Solo Piano',       bpm: [68, 78],  swing: 0,    unit: 16, beatsPerChord: 4, progs: 'soul',  drums: null,   bass: 'drone',  keys: 'arp',  melody: 0.45, crackle: false, tone: 4200, soft: true, verb: 0.4 },
+  ambient: { name: 'Ambient Drift',  bpm: [56, 62],  swing: 0,    unit: 16, beatsPerChord: 8, progs: 'focus', drums: null,   bass: 'drone',  keys: 'ambient', melody: 0.25, crackle: false, tone: 2600, soft: true, verb: 0.6 },
+  night: { name: 'Late Night Soul',  bpm: [62, 70],  swing: 0.18, unit: 16, beatsPerChord: 4, progs: 'soul',  drums: 'lofi', bass: 'groove', keys: 'night', melody: 0.4, crackle: false, tone: 2800, verb: 0.35 }
 };
-const MIX_ORDER = ['rnb', 'jazz', 'lofi', 'focus'];
+const MIX_ORDER = ['rnb', 'jazz', 'lofi', 'focus', 'bossa', 'chill', 'piano', 'night', 'ambient'];
 
 const choose = (a) => a[Math.floor(Math.random() * a.length)];
 const chance = (p) => Math.random() < p;
@@ -2314,7 +2433,7 @@ function createMusicEngine(channel) {
       keysPat: choose([[0, 6, 10], [0, 7], [0, 3, 10], [0, 10]])
     };
     tone.frequency.setTargetAtTime(S.tone, ctx.currentTime, 0.5);
-    send.gain.setTargetAtTime(style === 'focus' ? 0.5 : style === 'jazz' ? 0.22 : 0.28, ctx.currentTime, 0.5);
+    send.gain.setTargetAtTime(S.verb || (style === 'jazz' ? 0.22 : 0.28), ctx.currentTime, 0.5);
     stopCrackle();
     if (S.crackle) startCrackle();
     barsInTune = 0;
@@ -2369,6 +2488,11 @@ function createMusicEngine(channel) {
       if (s === 4 || s === 12) { brush(t, 0.8); hat(t, 0.35); }
       if (s % 4 === 0) kick(t, 0.13);
       if (chance(0.06)) brush(t, 0.35);
+    } else if (S.drums === 'bossa') {
+      if (s === 0 || s === 8) kick(t, 0.45);
+      if ((s === 6 || s === 14) && chance(0.7)) kick(t, 0.3);
+      if ([0, 3, 6, 10, 13].includes(s)) rim(t + human(), 0.55); // clave
+      hat(t + human(), s % 2 === 0 ? 0.28 : 0.16); // shaker
     }
 
     /* bass */
@@ -2383,6 +2507,11 @@ function createMusicEngine(channel) {
       else if (beat === 3) m = 36 + ((tune.key + chordAt(bar + 1, 0)[0]) % 12) + choose([-1, 1, 2]); // lead into the next chord
       else m = base + choose(CHORD[chord[1]].filter(i => i > 0 && i < 12));
       bassNote(t, m, sixteenth() * 3.6, 0.85);
+    } else if (S.bass === 'bossa') {
+      if (s === 0) bassNote(t, base, sixteenth() * 5, 0.85);
+      else if (s === 6) bassNote(t, base + 7, sixteenth() * 2, 0.6);
+      else if (s === 8) bassNote(t, base + 7, sixteenth() * 5, 0.75);
+      else if (s === 14) bassNote(t, base, sixteenth() * 2, 0.55);
     } else if (S.bass === 'drone' && isChordStart(bar, s)) {
       bassNote(t, base, chordLen * 0.95, 0.55);
     }
@@ -2395,10 +2524,25 @@ function createMusicEngine(channel) {
       voicing(root, chord[1], 52, 74).slice(0, 3).forEach((m, n) => ep(t + n * 0.008 + human(), m, sixteenth() * (s === 0 ? 2 : 1.5), 0.6, keysBus));
     } else if (S.keys === 'pad' && isChordStart(bar, s)) {
       pad(t, voicing(root, chord[1], 52, 76), chordLen);
+    } else if (S.keys === 'bossa' && [0, 3, 6, 10, 12].includes(s)) {
+      voicing(root, chord[1], 55, 76).slice(0, 4).forEach((m, n) => ep(t + n * 0.006 + human(), m, sixteenth() * 1.6, s === 0 ? 0.55 : 0.42, keysBus));
+    } else if (S.keys === 'arp' && s % 2 === 0) {
+      // rolling piano: low root on the chord, then the chord tones up and back down
+      const notes = voicing(root, chord[1], 55, 84);
+      const run = notes.concat(notes.slice(1, -1).reverse());
+      if (s === 0) ep(t, 48 + (root % 12), sixteenth() * 8, 0.5, keysBus, true);
+      ep(t + human(), run[(s / 2 + bar * 8) % run.length], sixteenth() * 3, 0.42, keysBus, true);
+    } else if (S.keys === 'ambient') {
+      if (isChordStart(bar, s)) pad(t, voicing(root, chord[1], 50, 74), chordLen);
+      if (s % 4 === 0 && chance(0.55)) ep(t + human(), choose(voicing(root, chord[1], 67, 88)), sixteenth() * 6, 0.32, keysBus, true);
+    } else if (S.keys === 'night') {
+      if (s === 0) pad(t, voicing(root, chord[1], 52, 72), chordLen);
+      if (s === 0 || s === 7 || (s === 11 && chance(0.5)))
+        voicing(root, chord[1], 57, 79).forEach((m, n) => ep(t + n * 0.014 + human(), m, sixteenth() * (s === 0 ? 6 : 3), s === 0 ? 0.6 : 0.45, keysBus, true));
     }
 
     /* melody */
-    const focus = style === 'focus';
+    const focus = !!S.soft;
     melodyPlan.filter(n => n.s === s).forEach(n => ep(t + human(), n.m, sixteenth() * n.len * (focus ? 2 : 1), focus ? 0.45 : 0.55, keysBus, focus));
   }
 
@@ -2479,10 +2623,24 @@ function cycleStation(step) {
 /* ── session ── */
 const zoneTask = () => zone && items.find(i => i.id === zone.taskId);
 
+/* Deep Work pulls from the same lists as Today / Now: "Do now" first, then
+   "Due today". While anything is in "Do now", only those tasks can be picked —
+   finish them before deep-focusing on the rest. With nothing due today, it
+   falls back to the "Next in line" list so there is always something to pick. */
+function zoneFocusPool() {
+  const agenda = getAgenda();
+  const dueToday = agenda.now.length + agenda.today.length > 0;
+  const pool = dueToday ? [...agenda.now, ...agenda.today] : agenda.next;
+  const nowIds = new Set(agenda.now.map(i => i.id));
+  const locked = new Set(nowIds.size ? pool.filter(i => !nowIds.has(i.id)).map(i => i.id) : []);
+  return { pool, locked, nowIds, dueToday };
+}
+
 function enterZone() {
   const it = items.find(i => i.id === zoneDraft.taskId);
   if (!it) { showNotification('Pick a task to check in to first.', 'error'); return; }
-  const minutes = zoneDraft.minutes || 50;
+  if (zoneFocusPool().locked.has(it.id)) { showNotification('Finish your "Do now" task first.', 'error'); return; }
+  const minutes = zoneDraft.minutes || taskMins(it) || 50;
   zone = { taskId: it.id, text: it.action || it.text, start: Date.now(), planned: minutes, intention: zoneDraft.intention.trim(), parked: 0, spentBefore: it.timeSpent || 0, summary: null };
   saveZone();
   startTimer(it.id, minutes);
@@ -2606,6 +2764,17 @@ function zoneSummaryHtml() {
   '</div>';
 }
 
+function zoneBreakHtml() {
+  const tips = ['Stand up and stretch', 'Drink some water', 'Look at something far away', 'Take a few slow breaths'];
+  return '<div class="zone-in my-auto flex flex-col items-center max-w-[560px]">' +
+    '<div class="text-[13px] font-semibold uppercase tracking-[.12em]" style="color:' + TONE.orange.fg + '">On a break</div>' +
+    '<div id="breakClock" class="mt-4 font-semibold tabular-nums tracking-[-0.03em] leading-none" style="font-size:clamp(48px,9vh,88px)">' + fmtClock(brk.endsAt - Date.now()) + '</div>' +
+    '<div class="mt-3 text-[14px] text-white/55">Breaks are ' + BREAK_MAX + ' minutes max — your session picks up again on its own.</div>' +
+    '<div class="mt-6 flex flex-wrap justify-center gap-2">' + tips.map(t => '<span class="px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-[12px] text-white/70">' + t + '</span>').join('') + '</div>' +
+    '<div class="mt-8">' + zCtl('Back to focus now', 'breakEnd', true) + '</div>' +
+  '</div>';
+}
+
 function renderZone() {
   const el = document.getElementById('zone');
   if (!zone) { el.classList.add('hidden'); return; }
@@ -2627,7 +2796,7 @@ function renderZone() {
         '</div>' +
       '</div>' +
       '<div class="flex-1 flex flex-col items-center px-5 py-6 text-center">' +
-        (zone.summary ? zoneSummaryHtml() :
+        (zone.summary ? zoneSummaryHtml() : brk ? zoneBreakHtml() :
           '<div class="zone-in my-auto flex flex-col items-center w-full">' +
             '<div class="relative flex-none" style="width:clamp(180px,34vh,320px);height:clamp(180px,34vh,320px)">' +
               '<div class="breath absolute inset-3 rounded-full"></div>' +
@@ -2650,10 +2819,11 @@ function renderZone() {
               zCtl('+5 min', 'extend') +
               '<button data-zone="toggle" aria-label="' + (paused ? 'Resume' : 'Pause') + '" class="w-14 h-14 rounded-full bg-white text-ink flex items-center justify-center hover:scale-105 transition-transform">' +
                 (paused ? '<svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3v10l8-5z"/></svg>' : '<svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z"/></svg>') + '</button>' +
+              zCtl('☕ Break', 'break') +
               zCtl('End session', 'end') +
               zCtl('✓ Done', 'done', true) +
             '</div>' +
-            '<div class="mt-3 text-[11px] text-white/30">Space to pause · Esc to leave the zone</div>' +
+            '<div class="mt-3 text-[11px] text-white/30">Space to pause · B for a ' + BREAK_MAX + '-min break · Esc to leave the zone</div>' +
           '</div>') +
       '</div>' +
       '<div class="grid md:grid-cols-2 gap-3 md:gap-4 px-5 md:px-10 pb-5 md:pb-8 flex-none">' +
@@ -2694,6 +2864,8 @@ document.getElementById('zone').addEventListener('click', (e) => {
     renderZone();
   }
   if (k === 'extend' && timer) { extendTimer(5); play('tick'); music.duck = 1; applyMusicVolume(1); renderZone(); }
+  if (k === 'break') startBreak(BREAK_MAX);
+  if (k === 'breakEnd') endBreak(false);
   if (k === 'end') { zoneEnd(); renderZone(); }
   if (k === 'done') { zoneDone(b); renderZone(); }
   if (k === 'rate') finishZone(b.dataset.rating);
@@ -2744,7 +2916,8 @@ document.addEventListener('keydown', (e) => {
   if (!zone || !zoneShown) return;
   const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
   if (e.key === 'Escape' && !zone.summary) { e.preventDefault(); hideZone(); }
-  if (e.key === ' ' && !typing && !zone.summary && timer) { e.preventDefault(); document.querySelector('#zone [data-zone="toggle"]').click(); }
+  if ((e.key === 'b' || e.key === 'B') && !typing && !zone.summary && timer) { e.preventDefault(); if (brk) endBreak(false); else startBreak(BREAK_MAX); return; }
+  if (e.key === ' ' && !typing && !zone.summary && timer && !brk) { e.preventDefault(); document.querySelector('#zone [data-zone="toggle"]').click(); }
 });
 
 /* ── check-in page ── */
@@ -2752,10 +2925,13 @@ const RATING = { deep: ['Deep', 'green'], steady: ['Steady', 'gray'], scattered:
 
 V.deepwork = () => {
   const today = ymd(new Date());
-  const pool = items.filter(i => i.status === 'next' || i.status === 'calendar')
-    .sort((a, b) => ((b.priority === 'urgent') - (a.priority === 'urgent')) || (!!(b.box && b.box.date === today) - !!(a.box && a.box.date === today)) || a.created - b.created);
-  if (!pool.some(i => i.id === zoneDraft.taskId)) zoneDraft.taskId = pool[0] ? pool[0].id : null;
+  const { pool, locked, nowIds, dueToday } = zoneFocusPool();
+  const pickable = pool.filter(i => !locked.has(i.id));
+  if (!pickable.some(i => i.id === zoneDraft.taskId)) zoneDraft.taskId = pickable[0] ? pickable[0].id : null;
   const picked = pool.find(i => i.id === zoneDraft.taskId);
+  const taskLen = picked ? taskMins(picked) : 0;
+  // the session length follows the task's duration (you can still pick another)
+  if (picked && zoneDraft.lenFor !== picked.id) { if (taskLen) zoneDraft.minutes = taskLen; zoneDraft.lenFor = picked.id; }
 
   const todaySecs = sessions.filter(s => sameDay(s.start, Date.now())).reduce((n, s) => n + s.focusedSec, 0);
   const week = sessions.filter(s => s.start > Date.now() - 7 * 864e5);
@@ -2765,7 +2941,8 @@ V.deepwork = () => {
   const headphones = '<path d="M2.5 10V8a5.5 5.5 0 0111 0v2"/><rect x="2" y="9.5" width="3" height="4.5" rx="1"/><rect x="11" y="9.5" width="3" height="4.5" rx="1"/>';
 
   const lens = [25, 50, 90];
-  if (picked && picked.box && !lens.includes(picked.box.minutes)) lens.push(picked.box.minutes);
+  if (taskLen && !lens.includes(taskLen)) lens.push(taskLen);
+  lens.sort((a, b) => a - b);
   const chip = (on, label, attr) =>
     '<button ' + attr + ' class="px-3.5 py-2 rounded-xl text-[13px] font-medium border ' + (on ? 'bg-brand border-brand text-paper' : 'bg-paper border-rule text-body hover:bg-canvas') + '">' + label + '</button>';
 
@@ -2775,23 +2952,30 @@ V.deepwork = () => {
           '<div class="min-w-0"><div class="text-[11px] text-paper/50 font-medium">Session in progress</div><div class="text-[14px] font-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(zone.text) + '</div></div>' +
           '<button data-act="zoneReturn" class="px-3.5 py-2 rounded-lg bg-paper text-ink text-[13px] font-semibold flex-none">Return to zone</button></div>'
       : '') +
-    '<div class="px-2 pt-1 pb-3 text-[13px] font-medium text-mute">1 · Check in to one task</div>' +
+    '<div class="px-2 pt-1 pb-1 text-[13px] font-medium text-mute">1 · Check in to one task</div>' +
+    '<div class="px-2 pb-3 text-[12px] ' + (locked.size ? 'text-[#E5534B]' : 'text-faint') + '">' +
+      (locked.size ? 'Finish your “Do now” task first — the rest unlock once it’s done.'
+        : dueToday ? 'Your “Do now” and “Due today” tasks.'
+        : 'Nothing due today — showing what’s next in line.') + '</div>' +
     (pool.length
       ? '<div class="flex flex-col gap-2 max-h-[300px] overflow-y-auto scroll pr-1">' + pool.map(i => {
           const on = i.id === zoneDraft.taskId;
-          return '<button data-act="zonePick" data-id="' + i.id + '" class="text-left flex items-center gap-3 rounded-xl border p-3.5 transition-colors ' + (on ? 'bg-brand-soft border-brand shadow-[0_4px_14px_rgba(108,92,231,0.12)]' : 'bg-paper border-line hover:border-rule') + '">' +
+          const off = locked.has(i.id);
+          const tag = nowIds.has(i.id) ? pill('Do now', 'red') : dueToday ? pill('Due today', 'orange') : '';
+          return '<button data-act="zonePick" data-id="' + i.id + '"' + (off ? ' disabled title="Finish your Do now task first"' : '') + ' class="text-left flex items-center gap-3 rounded-xl border p-3.5 transition-colors ' + (off ? 'bg-canvas border-line opacity-50 cursor-not-allowed' : on ? 'bg-brand-soft border-brand shadow-[0_4px_14px_rgba(108,92,231,0.12)]' : 'bg-paper border-line hover:border-rule') + '">' +
             '<span class="w-4 h-4 rounded-full border-[1.5px] flex-none flex items-center justify-center ' + (on ? 'border-brand' : 'border-rule') + '">' + (on ? '<span class="w-2 h-2 rounded-full bg-brand"></span>' : '') + '</span>' +
             '<span class="flex-1 min-w-0"><span class="block text-[14px] font-semibold leading-snug">' + esc(i.action || i.text) + '</span>' +
             '<span class="block mt-0.5 text-[12px] text-mute">' + cardSubtitle(i) + (i.box ? ' · boxed ' + esc(boxLabel(i.box)) : '') + '</span></span>' +
+            (off ? '<svg class="flex-none text-faint" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/></svg>' : tag) +
           '</button>';
         }).join('') + '</div>'
-      : emptyDrop('No next actions yet. Process your inbox, then come back to focus.', 'inbox')) +
+      : emptyDrop('Nothing to focus on yet. Process your inbox, then come back to focus.', 'inbox')) +
     '<div class="px-2 pt-6 pb-3 text-[13px] font-medium text-mute">2 · How long?</div>' +
-    '<div class="px-1 flex flex-wrap gap-2">' + lens.map(m => chip(zoneDraft.minutes === m, fmtMins(m) + (picked && picked.box && picked.box.minutes === m ? ' · box' : ''), 'data-act="zoneLen" data-min="' + m + '"')).join('') + '</div>' +
+    '<div class="px-1 flex flex-wrap gap-2">' + lens.map(m => chip(zoneDraft.minutes === m, fmtMins(m) + (taskLen === m ? ' · task' : ''), 'data-act="zoneLen" data-min="' + m + '"')).join('') + '</div>' +
     '<div class="px-2 pt-6 pb-3 text-[13px] font-medium text-mute">3 · What will you finish? <span class="text-faint">(optional)</span></div>' +
     '<div class="px-1"><input id="zoneIntention" autocomplete="off" value="' + esc(zoneDraft.intention) + '" placeholder="e.g. First draft of the intro section" class="w-full border border-rule rounded-xl px-3.5 py-3 text-[14px] bg-paper"></div>' +
     '<div class="px-1 pt-6 pb-1">' +
-      '<button data-act="zoneEnter"' + (pool.length && !zone ? '' : ' disabled') + ' class="w-full flex items-center justify-center gap-2.5 rounded-xl bg-brand text-paper py-3.5 text-[15px] shadow-[0_10px_30px_rgba(108,92,231,0.35)] font-semibold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">' +
+      '<button data-act="zoneEnter"' + (pickable.length && !zone ? '' : ' disabled') + ' class="w-full flex items-center justify-center gap-2.5 rounded-xl bg-brand text-paper py-3.5 text-[15px] shadow-[0_10px_30px_rgba(108,92,231,0.35)] font-semibold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed">' +
         '<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + headphones + '</svg>Enter the zone</button>' +
     '</div>'
   );
@@ -3614,6 +3798,7 @@ function renderProc() {
       '<div class="mt-10 flex flex-col gap-3.5 max-w-[680px]">' +
         '<div class="lbl text-label">What is the next physical action?</div>' +
         '<input id="procAction" class="border border-rule rounded-xl px-4 py-3.5 text-base w-full" placeholder="Call Brother support with the serial number" value="' + esc(P.action) + '">' +
+        '<div id="procDur" class="mt-1">' + durationPicker(it.duration) + '</div>' +
         '<div class="lbl text-label mt-5">Where does it go?</div>' +
         '<div class="flex flex-wrap gap-2">' +
           '<button data-d="now" class="px-4 py-2.5 rounded-xl text-[13px] font-medium text-paper bg-ink">Under 2 min → do it now</button>' +
@@ -3648,6 +3833,12 @@ document.getElementById('proc').addEventListener('click', (e) => {
   if (s2) {
     const d = s2.dataset.d;
     if (d === 'back') { P.step = 1; return renderProc(); }
+    if (d !== 'now') {
+      const dur = readDuration(document.getElementById('procDur'));
+      if (!dur) { showNotification('Add a duration — how long will this take?', 'error'); return; }
+      if (d === 'today' && !roomForToday(it)) return;
+      it.duration = dur;
+    }
     const field = document.getElementById('procAction');
     it.action = (field && field.value.trim()) || it.text;
     it.origin = it.text;
@@ -3967,9 +4158,20 @@ document.getElementById('detailsSave').addEventListener('click', () => {
   const pending = document.getElementById('newSubtaskInput').value.trim();
   if (pending) draftSubtasks.push({ text: pending, done: false });
 
-  item.priority = draftPriority;
-  item.duration = parseInt(document.getElementById('detailsDuration').value) || null;
+  const dur = parseInt(document.getElementById('detailsDuration').value);
+  if (!(dur > 0)) {
+    if (pending) draftSubtasks.pop();
+    showNotification('Add a duration — how many minutes will this take?', 'error');
+    document.getElementById('detailsDuration').focus();
+    return;
+  }
   const dueVal = document.getElementById('detailsDue').value.trim();
+  if ((draftPriority === 'urgent' || isTodayValue(dueVal)) && !roomForToday(item)) {
+    if (pending) draftSubtasks.pop();
+    return;
+  }
+  item.priority = draftPriority;
+  item.duration = dur;
   item.dueTime = dueVal || null;
   if (dueVal && isTodayValue(dueVal)) {
     item.status = 'today';
@@ -4079,6 +4281,8 @@ function openQuickCapture() {
     input.value = '';
     setTimeout(() => input.focus(), 60);
   }
+  const dur = document.getElementById('quickCaptureDur');
+  if (dur) dur.innerHTML = durationPicker();
 }
 
 function closeQuickCapture() {
@@ -4093,7 +4297,9 @@ if (qcForm) {
     const input = document.getElementById('quickCaptureInput');
     const val = input ? input.value.trim() : '';
     if (!val) return;
-    const item = mk({ text: val });
+    const duration = readDuration(qcForm);
+    if (!duration) { showNotification('Add a duration — how long will this take?', 'error'); return; }
+    const item = mk({ text: val, duration });
     items.unshift(item);
     play('capture');
     logAdd(item);
@@ -4335,10 +4541,10 @@ document.addEventListener('drop', (e) => {
 
   const colKey = col.dataset.colKey;
   if (colKey === 'now') {
-    moveItem(item, 'now');
+    if (!moveItem(item, 'now')) return;
     showNotification('Moved to Do now', 'urgent');
   } else if (colKey === 'today') {
-    moveItem(item, 'today');
+    if (!moveItem(item, 'today')) return;
     showNotification('⭐ Moved to Due today', 'success');
   } else if (colKey === 'next') {
     moveItem(item, 'next');
@@ -4407,7 +4613,7 @@ document.addEventListener('click', (e) => {
     render();
     return;
   }
-  if (a === 'zonePick') { zoneDraft.taskId = id; const it = items.find(i => i.id === id); if (it && it.box) zoneDraft.minutes = it.box.minutes; play('tick'); render(); return; }
+  if (a === 'zonePick') { if (zoneFocusPool().locked.has(id)) { showNotification('Finish your "Do now" task first.', 'error'); return; } zoneDraft.taskId = id; const it = items.find(i => i.id === id); if (it && taskMins(it)) { zoneDraft.minutes = taskMins(it); zoneDraft.lenFor = id; } play('tick'); render(); return; }
   if (a === 'zoneLen') { zoneDraft.minutes = Number(act.dataset.min); zonePrefs.minutes = zoneDraft.minutes; saveZonePrefs(); play('tick'); render(); return; }
   if (a === 'zoneStation') { zonePrefs.station = act.dataset.st; saveZonePrefs(); if (zone) startMusic(zonePrefs.station); play('tick'); render(); return; }
   if (a === 'zoneEnter') { enterZone(); return; }
@@ -4456,6 +4662,7 @@ document.addEventListener('click', (e) => {
         persist(); render();
       });
     } else {
+      if (!roomForToday(item)) return;
       item.status = 'today';
       item.dueTime = 'Today';
       item.context = item.context || CONTEXTS[0] || '@Anywhere';
@@ -4567,7 +4774,9 @@ document.addEventListener('submit', (e) => {
   e.preventDefault();
   const v = f.text.value.trim();
   if (!v) return;
-  const item = mk({ text: v });
+  const duration = readDuration(f);
+  if (!duration) { showNotification('Add a duration — how long will this take?', 'error'); return; }
+  const item = mk({ text: v, duration });
   items.unshift(item);
   play('capture');
   logAdd(item);
